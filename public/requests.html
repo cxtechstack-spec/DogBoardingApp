@@ -260,7 +260,8 @@
     const list = document.getElementById(containerId);
     const res = await fetch(API(`/api/bookings?status=${status}`));
     if (!res.ok) {
-      list.innerHTML = '<p class="empty-state">Could not load.</p>';
+      const { error } = await res.json().catch(() => ({}));
+      list.innerHTML = `<p class="empty-state">${error || 'Could not load.'}</p>`;
       return;
     }
     const { bookings } = await res.json();

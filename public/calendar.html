@@ -225,7 +225,8 @@
     const res = await fetch(API(`/api/bookings/calendar?start=${start}&end=${end}`));
     const grid = document.getElementById('cal-grid');
     if (!res.ok) {
-      grid.innerHTML = '<p class="empty-state">Could not load calendar.</p>';
+      const { error } = await res.json().catch(() => ({}));
+      grid.innerHTML = `<p class="empty-state">${error || 'Could not load calendar.'}</p>`;
       return;
     }
     const { bookings, pools } = await res.json();
