@@ -1,0 +1,11 @@
+.env
+node_modules/
+
+/lib/generated/prisma
+
+# Local SQLite dev database — never commit real or test booking data
+*.db
+*.db-journal
+
+# Personal Claude Code tool preferences, not project source
+.claude/settings.local.json

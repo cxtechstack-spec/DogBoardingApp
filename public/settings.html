@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Boarding Settings</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      color: #1a1a1a;
+      background: #f5f5f5;
+      padding: 24px;
+    }
+
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 24px; }
+    h2 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+    h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; color: #444; text-transform: uppercase; letter-spacing: 0.05em; }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .service-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 0;
+    }
+
+    .service-header label { font-weight: 600; font-size: 15px; cursor: pointer; }
+
+    .service-body {
+      display: none;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #eee;
+    }
+
+    .service-body.open { display: block; }
+
+    .field-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .field-row.three { grid-template-columns: 1fr 1fr 1fr; }
+    .field-row.full { grid-template-columns: 1fr; }
+
+    label.field-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: #555;
+      margin-bottom: 4px;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    select {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #d0d0d0;
+      border-radius: 6px;
+      font-size: 13px;
+      background: #fff;
+    }
+
+    input:focus, select:focus {
+      outline: none;
+      border-color: #4f46e5;
+      box-shadow: 0 0 0 2px rgba(79,70,229,0.15);
+    }
+
+    .days-grid {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .day-chip {
+      padding: 5px 10px;
+      border: 1px solid #d0d0d0;
+      border-radius: 20px;
+      font-size: 12px;
+      cursor: pointer;
+      user-select: none;
+      background: #fff;
+    }
+
+    .day-chip.active {
+      background: #4f46e5;
+      color: #fff;
+      border-color: #4f46e5;
+    }
+
+    .save-btn {
+      margin-top: 14px;
+      padding: 8px 16px;
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .save-btn:hover { background: #4338ca; }
+
+    .save-status {
+      display: inline-block;
+      margin-left: 10px;
+      font-size: 12px;
+      color: #16a34a;
+    }
+
+    /* Add-ons */
+    .addon-list { margin-bottom: 12px; }
+
+    .addon-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .addon-row:last-child { border-bottom: none; }
+
+    .addon-row span { flex: 1; font-size: 13px; }
+    .addon-row .addon-meta { color: #666; font-size: 12px; }
+
+    .icon-btn {
+      padding: 4px 8px;
+      border: 1px solid #d0d0d0;
+      border-radius: 5px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .icon-btn.danger { color: #dc2626; border-color: #fca5a5; }
+    .icon-btn.danger:hover { background: #fef2f2; }
+
+    .addon-form {
+      display: grid;
+      grid-template-columns: 2fr 1fr auto;
+      gap: 8px;
+      align-items: end;
+      margin-top: 12px;
+    }
+
+    .addon-form button {
+      padding: 7px 12px;
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .empty-state { color: #888; font-size: 13px; padding: 8px 0; }
+  </style>
+</head>
+<body>
+
+<h1>Boarding Settings</h1>
+
+<!-- GHL CONNECTION -->
+<div class="card">
+  <h2>GHL Connection</h2>
+  <p style="color:#666; font-size:12px; margin-bottom:12px;">
+    Paste this business's own GHL Private Integration Token so this app can read/write their contacts, dog
+    records, and invoices. Required before anything else on this page will actually work.
+  </p>
+  <div class="field-row full">
+    <div>
+      <label class="field-label">API Token</label>
+      <input type="password" id="ghl-token" placeholder="pit-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+    </div>
+  </div>
+  <button class="save-btn" onclick="saveGhlConnection()">Save &amp; Connect</button>
+  <span class="save-status" id="status-ghl-connection"></span>
+  <div id="ghl-connection-indicator" style="margin-top:10px; font-size:13px;"></div>
+</div>
+
+<!-- TOTAL CAPACITY -->
+<div class="card">
+  <h2>Total Capacity</h2>
+  <p style="color:#666; font-size:12px; margin-bottom:12px;">
+    Groups of physical spaces (e.g. kennels, crates). Link each service below to the capacity it draws from —
+    services sharing the same capacity compete for the same spots on a given day.
+  </p>
+  <div class="addon-list" id="capacity-list">
+    <p class="empty-state">No capacity entries configured.</p>
+  </div>
+  <div class="addon-form" style="grid-template-columns: 2fr 1fr auto;">
+    <div>
+      <label class="field-label">Name</label>
+      <input type="text" id="capacity-name" placeholder="e.g. Kennels">
+    </div>
+    <div>
+      <label class="field-label">Total Capacity</label>
+      <input type="number" id="capacity-total" min="1" placeholder="e.g. 20">
+    </div>
+    <button onclick="addCapacity()">+ Add</button>
+  </div>
+</div>
+
+<!-- UNITS -->
+<div class="card">
+  <h2>Units</h2>
+  <p style="color:#666; font-size:12px; margin-bottom:12px;">
+    Specific physical spaces within a capacity total (e.g. "Kennel 1"). Staff assign a booking to one of these
+    when confirming it — the calendar and double-booking checks are both based on this list.
+  </p>
+  <div class="addon-list" id="unit-list">
+    <p class="empty-state">No units configured.</p>
+  </div>
+  <div class="addon-form" style="grid-template-columns: 2fr 1fr auto;">
+    <div>
+      <label class="field-label">Unit Name</label>
+      <input type="text" id="unit-name" placeholder="e.g. Kennel 1">
+    </div>
+    <div>
+      <label class="field-label">Capacity</label>
+      <select id="unit-pool"></select>
+    </div>
+    <button onclick="addUnit()">+ Add</button>
+  </div>
+</div>
+
+<!-- SERVICES -->
+<div class="card" id="card-BOARDING">
+  <div class="service-header">
+    <input type="checkbox" id="enable-BOARDING">
+    <label for="enable-BOARDING">Boarding</label>
+  </div>
+  <div class="service-body" id="body-BOARDING">
+    <div class="field-row">
+      <div>
+        <label class="field-label">Billing Unit</label>
+        <select id="billingUnit-BOARDING">
+          <option value="NIGHT">Night (charge per night)</option>
+          <option value="DAY">Day (charge per calendar day)</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Base Rate ($)</label>
+        <input type="number" id="baseRate-BOARDING" min="0" step="0.01" placeholder="e.g. 55">
+      </div>
+    </div>
+    <div class="field-row three">
+      <div>
+        <label class="field-label">Total Capacity</label>
+        <select id="capacityPool-BOARDING"><option value="">Select…</option></select>
+      </div>
+      <div>
+        <label class="field-label">Deposit Type</label>
+        <select id="depositType-BOARDING">
+          <option value="NONE">None</option>
+          <option value="PERCENT">Percent of total</option>
+          <option value="FLAT">Flat amount</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Deposit Value</label>
+        <input type="number" id="depositValue-BOARDING" min="0" step="0.01" placeholder="0">
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label class="field-label">Deposit Timing</label>
+        <select id="depositTiming-BOARDING">
+          <option value="at_booking">Due at booking</option>
+          <option value="at_dropoff">Due at drop-off</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <label class="field-label" style="margin-bottom:8px">Operating Days</label>
+      <div class="days-grid" id="days-BOARDING"></div>
+    </div>
+    <button class="save-btn" onclick="saveService('BOARDING')">Save Boarding Settings</button>
+    <span class="save-status" id="status-BOARDING"></span>
+  </div>
+</div>
+
+<div class="card" id="card-DAY_CARE">
+  <div class="service-header">
+    <input type="checkbox" id="enable-DAY_CARE">
+    <label for="enable-DAY_CARE">Day Care</label>
+  </div>
+  <div class="service-body" id="body-DAY_CARE">
+    <div class="field-row">
+      <div>
+        <label class="field-label">Billing Unit</label>
+        <select id="billingUnit-DAY_CARE">
+          <option value="DAY">Day</option>
+          <option value="NIGHT">Night</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Base Rate ($)</label>
+        <input type="number" id="baseRate-DAY_CARE" min="0" step="0.01" placeholder="e.g. 35">
+      </div>
+    </div>
+    <div class="field-row three">
+      <div>
+        <label class="field-label">Total Capacity</label>
+        <select id="capacityPool-DAY_CARE"><option value="">Select…</option></select>
+      </div>
+      <div>
+        <label class="field-label">Deposit Type</label>
+        <select id="depositType-DAY_CARE">
+          <option value="NONE">None</option>
+          <option value="PERCENT">Percent of total</option>
+          <option value="FLAT">Flat amount</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Deposit Value</label>
+        <input type="number" id="depositValue-DAY_CARE" min="0" step="0.01" placeholder="0">
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label class="field-label">Deposit Timing</label>
+        <select id="depositTiming-DAY_CARE">
+          <option value="at_booking">Due at booking</option>
+          <option value="at_dropoff">Due at drop-off</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <label class="field-label" style="margin-bottom:8px">Operating Days</label>
+      <div class="days-grid" id="days-DAY_CARE"></div>
+    </div>
+    <button class="save-btn" onclick="saveService('DAY_CARE')">Save Day Care Settings</button>
+    <span class="save-status" id="status-DAY_CARE"></span>
+  </div>
+</div>
+
+<div class="card" id="card-DAY_TRAINING">
+  <div class="service-header">
+    <input type="checkbox" id="enable-DAY_TRAINING">
+    <label for="enable-DAY_TRAINING">Day Training</label>
+  </div>
+  <div class="service-body" id="body-DAY_TRAINING">
+    <div class="field-row">
+      <div>
+        <label class="field-label">Billing Unit</label>
+        <select id="billingUnit-DAY_TRAINING">
+          <option value="DAY">Day</option>
+          <option value="NIGHT">Night</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Base Rate ($)</label>
+        <input type="number" id="baseRate-DAY_TRAINING" min="0" step="0.01" placeholder="e.g. 100">
+      </div>
+    </div>
+    <div class="field-row three">
+      <div>
+        <label class="field-label">Total Capacity</label>
+        <select id="capacityPool-DAY_TRAINING"><option value="">Select…</option></select>
+      </div>
+      <div>
+        <label class="field-label">Deposit Type</label>
+        <select id="depositType-DAY_TRAINING">
+          <option value="NONE">None</option>
+          <option value="PERCENT">Percent of total</option>
+          <option value="FLAT">Flat amount</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Deposit Value</label>
+        <input type="number" id="depositValue-DAY_TRAINING" min="0" step="0.01" placeholder="0">
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label class="field-label">Deposit Timing</label>
+        <select id="depositTiming-DAY_TRAINING">
+          <option value="at_booking">Due at booking</option>
+          <option value="at_dropoff">Due at drop-off</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <label class="field-label" style="margin-bottom:8px">Operating Days</label>
+      <div class="days-grid" id="days-DAY_TRAINING"></div>
+    </div>
+    <button class="save-btn" onclick="saveService('DAY_TRAINING')">Save Day Training Settings</button>
+    <span class="save-status" id="status-DAY_TRAINING"></span>
+  </div>
+</div>
+
+<!-- ADD-ONS -->
+<div class="card">
+  <h2>Add-Ons</h2>
+  <div class="addon-form" style="margin-bottom: 16px;">
+    <div>
+      <label class="field-label">Max Add-Ons Per Day</label>
+      <input type="number" id="max-addons-per-day" min="1" placeholder="2">
+    </div>
+    <button onclick="saveMaxAddOnsPerDay()">Save</button>
+    <span class="save-status" id="status-max-addons"></span>
+  </div>
+  <div class="addon-list" id="addon-list">
+    <p class="empty-state">No add-ons configured.</p>
+  </div>
+  <div class="addon-form">
+    <div>
+      <label class="field-label">Add-On Name</label>
+      <input type="text" id="addon-name" placeholder="e.g. Dock Diving">
+    </div>
+    <div>
+      <label class="field-label">Price ($)</label>
+      <input type="number" id="addon-price" min="0" step="0.01" placeholder="15">
+    </div>
+    <button onclick="addAddon()">+ Add</button>
+  </div>
+</div>
+
+<script>
+  const DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
+  const DAY_LABELS = { MON:'Mon', TUE:'Tue', WED:'Wed', THU:'Thu', FRI:'Fri', SAT:'Sat', SUN:'Sun' };
+  const SERVICES = ['BOARDING', 'DAY_CARE', 'DAY_TRAINING'];
+
+  // Get location_id from URL (injected by GHL Custom Menu Link)
+  const params = new URLSearchParams(window.location.search);
+  const locationId = params.get('location_id') || 'dev-test';
+  const API = (path) => `${path}?location_id=${encodeURIComponent(locationId)}`;
+
+  // Track selected days per service
+  const selectedDays = { BOARDING: new Set(), DAY_CARE: new Set(), DAY_TRAINING: new Set() };
+  // Track editing state for add-ons
+  let editingAddonId = null;
+
+  // Build day-of-week chip selectors
+  SERVICES.forEach(svc => {
+    const container = document.getElementById(`days-${svc}`);
+    DAYS.forEach(day => {
+      const chip = document.createElement('div');
+      chip.className = 'day-chip';
+      chip.textContent = DAY_LABELS[day];
+      chip.dataset.day = day;
+      chip.onclick = () => {
+        if (selectedDays[svc].has(day)) {
+          selectedDays[svc].delete(day);
+          chip.classList.remove('active');
+        } else {
+          selectedDays[svc].add(day);
+          chip.classList.add('active');
+        }
+      };
+      container.appendChild(chip);
+    });
+  });
+
+  // Toggle service panel open/closed
+  SERVICES.forEach(svc => {
+    const checkbox = document.getElementById(`enable-${svc}`);
+    const body = document.getElementById(`body-${svc}`);
+    checkbox.addEventListener('change', () => {
+      body.classList.toggle('open', checkbox.checked);
+      if (!checkbox.checked) {
+        // Disable and clear service settings
+        fetch(API(`/api/settings/services/${svc}`), { method: 'DELETE' });
+      }
+    });
+  });
+
+  // Load existing settings and populate the form
+  function renderGhlConnectionStatus(connected) {
+    document.getElementById('ghl-connection-indicator').innerHTML = connected
+      ? '<span style="color:#16a34a; font-weight:600;">✓ Connected</span>'
+      : '<span style="color:#888;">Not connected yet</span>';
+  }
+
+  async function saveGhlConnection() {
+    const status = document.getElementById('status-ghl-connection');
+    const apiToken = document.getElementById('ghl-token').value.trim();
+    if (!apiToken) return;
+
+    status.textContent = 'Saving…';
+    const res = await fetch(API('/api/settings/ghl-connection'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiToken }),
+    });
+
+    if (!res.ok) {
+      const { error } = await res.json();
+      status.textContent = `✗ ${error}`;
+      return;
+    }
+
+    document.getElementById('ghl-token').value = '';
+    status.textContent = '✓ Saved';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+    renderGhlConnectionStatus(true);
+  }
+
+  async function loadSettings() {
+    const res = await fetch(API('/api/settings'));
+    const { client } = await res.json();
+
+    renderGhlConnectionStatus(client.ghlConnected);
+    document.getElementById('max-addons-per-day').value = client.maxAddOnsPerDay;
+
+    renderCapacities(client.capacityPools);
+    populateCapacityDropdowns(client.capacityPools);
+    renderUnits(client.capacityPools);
+    populateUnitPoolDropdown(client.capacityPools);
+
+    client.services.forEach(svc => {
+      const checkbox = document.getElementById(`enable-${svc.serviceType}`);
+      const body = document.getElementById(`body-${svc.serviceType}`);
+      if (!checkbox) return;
+
+      checkbox.checked = true;
+      body.classList.add('open');
+
+      document.getElementById(`billingUnit-${svc.serviceType}`).value = svc.billingUnit;
+      document.getElementById(`baseRate-${svc.serviceType}`).value = svc.baseRate;
+      document.getElementById(`capacityPool-${svc.serviceType}`).value = svc.capacityPoolId;
+      document.getElementById(`depositType-${svc.serviceType}`).value = svc.depositType;
+      document.getElementById(`depositValue-${svc.serviceType}`).value = svc.depositValue;
+      document.getElementById(`depositTiming-${svc.serviceType}`).value = svc.depositTiming;
+
+      // Restore active days
+      const days = JSON.parse(svc.activeDays);
+      days.forEach(day => {
+        selectedDays[svc.serviceType].add(day);
+        const chip = document.querySelector(`#days-${svc.serviceType} [data-day="${day}"]`);
+        if (chip) chip.classList.add('active');
+      });
+    });
+
+    renderAddons(client.addOns);
+  }
+
+  async function saveService(svc) {
+    const status = document.getElementById(`status-${svc}`);
+    status.textContent = 'Saving…';
+
+    const body = {
+      billingUnit: document.getElementById(`billingUnit-${svc}`).value,
+      baseRate: document.getElementById(`baseRate-${svc}`).value,
+      capacityPoolId: document.getElementById(`capacityPool-${svc}`).value,
+      activeDays: Array.from(selectedDays[svc]),
+      depositType: document.getElementById(`depositType-${svc}`).value,
+      depositValue: document.getElementById(`depositValue-${svc}`).value,
+      depositTiming: document.getElementById(`depositTiming-${svc}`).value,
+    };
+
+    if (!body.capacityPoolId) {
+      status.textContent = '✗ Select a capacity first';
+      return;
+    }
+
+    const res = await fetch(API(`/api/settings/services/${svc}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    status.textContent = res.ok ? '✓ Saved' : '✗ Error';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
+
+  function renderCapacities(capacities) {
+    const list = document.getElementById('capacity-list');
+    if (!capacities.length) {
+      list.innerHTML = '<p class="empty-state">No capacity entries configured.</p>';
+      return;
+    }
+    list.innerHTML = capacities.map(c => `
+      <div class="addon-row">
+        <span>${c.name}</span>
+        <span class="addon-meta">${c.totalCapacity} total</span>
+        <button class="icon-btn danger" onclick="deleteCapacity('${c.id}')">Remove</button>
+      </div>
+    `).join('');
+  }
+
+  function populateCapacityDropdowns(capacities) {
+    SERVICES.forEach(svc => {
+      const select = document.getElementById(`capacityPool-${svc}`);
+      const current = select.value;
+      select.innerHTML = '<option value="">Select…</option>' +
+        capacities.map(c => `<option value="${c.id}">${c.name} (${c.totalCapacity} total)</option>`).join('');
+      select.value = current;
+    });
+  }
+
+  async function addCapacity() {
+    const name = document.getElementById('capacity-name').value.trim();
+    const totalCapacity = document.getElementById('capacity-total').value;
+    if (!name || !totalCapacity) return;
+
+    await fetch(API('/api/settings/pools'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, totalCapacity }),
+    });
+
+    document.getElementById('capacity-name').value = '';
+    document.getElementById('capacity-total').value = '';
+
+    const res = await fetch(API('/api/settings'));
+    const { client } = await res.json();
+    renderCapacities(client.capacityPools);
+    populateCapacityDropdowns(client.capacityPools);
+    populateUnitPoolDropdown(client.capacityPools);
+  }
+
+  async function deleteCapacity(id) {
+    const res = await fetch(API(`/api/settings/pools/${id}`), { method: 'DELETE' });
+    if (!res.ok) {
+      const { error } = await res.json();
+      alert(error);
+      return;
+    }
+    const settingsRes = await fetch(API('/api/settings'));
+    const { client } = await settingsRes.json();
+    renderCapacities(client.capacityPools);
+    populateCapacityDropdowns(client.capacityPools);
+  }
+
+  function renderUnits(pools) {
+    const list = document.getElementById('unit-list');
+    const units = pools.flatMap(p => p.units.map(u => ({ ...u, poolName: p.name })));
+    if (!units.length) {
+      list.innerHTML = '<p class="empty-state">No units configured.</p>';
+      return;
+    }
+    list.innerHTML = units.map(u => `
+      <div class="addon-row">
+        <span>${u.name}</span>
+        <span class="addon-meta">${u.poolName}</span>
+        <button class="icon-btn danger" onclick="deleteUnit('${u.id}')">Remove</button>
+      </div>
+    `).join('');
+  }
+
+  function populateUnitPoolDropdown(pools) {
+    const select = document.getElementById('unit-pool');
+    const current = select.value;
+    select.innerHTML = pools.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    select.value = current;
+  }
+
+  async function addUnit() {
+    const name = document.getElementById('unit-name').value.trim();
+    const capacityPoolId = document.getElementById('unit-pool').value;
+    if (!name || !capacityPoolId) return;
+
+    await fetch(API('/api/settings/units'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, capacityPoolId }),
+    });
+
+    document.getElementById('unit-name').value = '';
+
+    const res = await fetch(API('/api/settings'));
+    const { client } = await res.json();
+    renderUnits(client.capacityPools);
+  }
+
+  async function deleteUnit(id) {
+    const res = await fetch(API(`/api/settings/units/${id}`), { method: 'DELETE' });
+    if (!res.ok) {
+      const { error } = await res.json();
+      alert(error);
+      return;
+    }
+    const settingsRes = await fetch(API('/api/settings'));
+    const { client } = await settingsRes.json();
+    renderUnits(client.capacityPools);
+  }
+
+  function renderAddons(addOns) {
+    const list = document.getElementById('addon-list');
+    if (!addOns.length) {
+      list.innerHTML = '<p class="empty-state">No add-ons configured.</p>';
+      return;
+    }
+    list.innerHTML = addOns.map(a => `
+      <div class="addon-row">
+        <span>${a.name}</span>
+        <span class="addon-meta">$${a.price.toFixed(2)}</span>
+        <button class="icon-btn danger" onclick="deleteAddon('${a.id}')">Remove</button>
+      </div>
+    `).join('');
+  }
+
+  async function addAddon() {
+    const name = document.getElementById('addon-name').value.trim();
+    const price = document.getElementById('addon-price').value;
+    if (!name || !price) return;
+
+    await fetch(API('/api/settings/addons'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, price }),
+    });
+
+    document.getElementById('addon-name').value = '';
+    document.getElementById('addon-price').value = '';
+
+    // Reload to refresh the list
+    const res = await fetch(API('/api/settings'));
+    const { client } = await res.json();
+    renderAddons(client.addOns);
+  }
+
+  async function saveMaxAddOnsPerDay() {
+    const status = document.getElementById('status-max-addons');
+    const maxAddOnsPerDay = document.getElementById('max-addons-per-day').value;
+    status.textContent = 'Saving…';
+
+    const res = await fetch(API('/api/settings/max-addons-per-day'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxAddOnsPerDay }),
+    });
+
+    status.textContent = res.ok ? '✓ Saved' : '✗ Error';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
+
+  async function deleteAddon(id) {
+    await fetch(API(`/api/settings/addons/${id}`), { method: 'DELETE' });
+    const res = await fetch(API('/api/settings'));
+    const { client } = await res.json();
+    renderAddons(client.addOns);
+  }
+
+  // Serve the settings page and load current data
+  loadSettings();
+</script>
+</body>
+</html>

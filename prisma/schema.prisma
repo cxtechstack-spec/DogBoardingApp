@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// One record per ConnectXperts client business.
+// ghlLocationId is the key that ties this app to their GHL account.
+model Client {
+  id                   String            @id @default(cuid())
+  ghlLocationId        String            @unique
+  services             ServiceSettings[]
+  addOns               AddOn[]
+  capacityPools        CapacityPool[]
+  bookings             Booking[]
+  // Combined cap on add-on selections per day, across the whole add-on list
+  // (not per individual add-on) — e.g. Dock Diving + Agility together can hit this cap.
+  maxAddOnsPerDay      Int               @default(1)
+  // AES-256-GCM ciphertext (see lib/crypto.js) — this business's own GHL Private
+  // Integration Token. Null until they complete the GHL Connection step in Settings.
+  ghlApiTokenEncrypted String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+}
+
+// A named group of physical spaces (e.g. "Kennels", "Crates") that one or more
+// services draw from. Services sharing a pool compete for the same spots on a given day.
+model CapacityPool {
+  id            String            @id @default(cuid())
+  clientId      String
+  client        Client            @relation(fields: [clientId], references: [id])
+  name          String
+  totalCapacity Int
+  services      ServiceSettings[]
+  units         Unit[]
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+}
+
+// A specific physical space within a pool (e.g. "Kennel 1"). Unlike the pool's
+// totalCapacity (a count), a unit is a hard, single-occupancy resource — Confirm
+// blocks assigning a unit that's already taken for overlapping dates.
+model Unit {
+  id             String       @id @default(cuid())
+  capacityPoolId String
+  capacityPool   CapacityPool @relation(fields: [capacityPoolId], references: [id])
+  name           String
+  bookings       Booking[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+// Per-client, per-service configuration.
+// One row per (client, serviceType) pair — enforced by the unique constraint.
+model ServiceSettings {
+  id             String       @id @default(cuid())
+  clientId       String
+  client         Client       @relation(fields: [clientId], references: [id])
+  serviceType    ServiceType
+  billingUnit    BillingUnit
+  baseRate       Float
+  // The pool of physical spaces this service draws from. Other services linked to
+  // the same pool reduce this service's effective availability on a shared day.
+  capacityPoolId String
+  capacityPool   CapacityPool @relation(fields: [capacityPoolId], references: [id])
+  // JSON array of active day abbreviations: ["MON","TUE","WED","THU","FRI","SAT","SUN"]
+  // Days absent from this list are treated as capacity 0 (non-operating).
+  activeDays     String
+  depositType    DepositType
+  depositValue   Float
+  depositTiming  String // e.g. "at_booking" or "at_dropoff"
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([clientId, serviceType])
+}
+
+// Optional add-ons a client offers (e.g. dock diving, agility, training).
+// Clients with no add-ons simply have an empty list.
+model AddOn {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  name      String
+  price     Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One booking record per stay.
+// Dog and owner data are NOT copied here — read live from GHL using the stored IDs.
+model Booking {
+  id                    String        @id @default(cuid())
+  clientId              String
+  client                Client        @relation(fields: [clientId], references: [id])
+  ghlDogObjectId        String // GHL Custom Object record ID for the dog
+  ghlOwnerContactId     String // GHL Contact ID for the owner
+  serviceType           ServiceType
+  startDate             DateTime
+  endDate               DateTime
+  unitId                String? // Assigned physical unit — null until confirmed
+  unit                  Unit?         @relation(fields: [unitId], references: [id])
+  // JSON: array of { addOnId, name, price, qty } — snapshot at time of booking
+  addOnsSelected        String        @default("[]")
+  status                BookingStatus @default(REQUESTED)
+  denialReason          String? // Optional staff note when status is DENIED
+  lockedRate            Float // Snapshot of base rate at time of booking
+  ghlInvoiceId          String? // Deposit invoice, set once created in GHL
+  ghlRemainderInvoiceId String? // Balance-due invoice, set at Check Out
+  // JSON: { checked: bool, timestamp: ISO, details: {} }
+  vaccineCheckBooking   String?
+  vaccineCheckDropoff   String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+}
+
+enum ServiceType {
+  BOARDING
+  DAY_CARE
+  DAY_TRAINING
+}
+
+enum BillingUnit {
+  DAY
+  NIGHT
+}
+
+enum DepositType {
+  NONE
+  PERCENT
+  FLAT
+}
+
+enum BookingStatus {
+  REQUESTED
+  CONFIRMED
+  ACTIVE
+  COMPLETED
+  DENIED
+}

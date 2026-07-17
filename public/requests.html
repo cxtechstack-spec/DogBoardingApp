@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bookings</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      color: #1a1a1a;
+      background: #f5f5f5;
+      padding: 24px;
+    }
+
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 24px; }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #444;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin: 28px 0 12px;
+    }
+
+    .section-title:first-of-type { margin-top: 0; }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .request-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .request-header h2 { font-size: 15px; font-weight: 600; }
+    .request-header .sub { font-size: 12px; color: #666; margin-top: 2px; }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .badge.danger { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+    .badge.ok { background: #f0fdf4; color: #16a34a; border: 1px solid #86efac; }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 14px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid #eee;
+    }
+
+    .detail-grid .field-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 500;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-bottom: 2px;
+    }
+
+    .detail-grid .field-value { font-size: 13px; }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .actions.single {
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .action-group { display: flex; gap: 8px; align-items: center; }
+
+    input[type="text"], textarea, select {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #d0d0d0;
+      border-radius: 6px;
+      font-size: 13px;
+      background: #fff;
+      font-family: inherit;
+    }
+
+    textarea { resize: vertical; min-height: 34px; }
+
+    input:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: #4f46e5;
+      box-shadow: 0 0 0 2px rgba(79,70,229,0.15);
+    }
+
+    button {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .confirm-btn { background: #4f46e5; color: #fff; }
+    .confirm-btn:hover { background: #4338ca; }
+    .deny-btn { background: #fff; color: #dc2626; border: 1px solid #fca5a5; }
+    .deny-btn:hover { background: #fef2f2; }
+
+    .empty-state { color: #888; font-size: 13px; padding: 8px 0; }
+  </style>
+</head>
+<body>
+
+<h1>Bookings <a id="calendar-link" href="#" style="font-size:13px; font-weight:500; color:#4f46e5; margin-left:8px;">View Calendar →</a></h1>
+
+<h2 class="section-title">Requests</h2>
+<div id="requests-list">
+  <p class="empty-state">Loading…</p>
+</div>
+
+<h2 class="section-title">Confirmed — Awaiting Check-In</h2>
+<div id="confirmed-list">
+  <p class="empty-state">Loading…</p>
+</div>
+
+<h2 class="section-title">Active — Awaiting Check-Out</h2>
+<div id="active-list">
+  <p class="empty-state">Loading…</p>
+</div>
+
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const locationId = params.get('location_id') || 'dev-test';
+  const API = (path) => `${path}${path.includes('?') ? '&' : '?'}location_id=${encodeURIComponent(locationId)}`;
+
+  document.getElementById('calendar-link').href = `calendar.html?location_id=${encodeURIComponent(locationId)}`;
+
+  const SERVICE_LABELS = { BOARDING: 'Boarding', DAY_CARE: 'Day Care', DAY_TRAINING: 'Day Training' };
+
+  let settingsClient = null;
+
+  // Units available for a given service, via that service's capacity pool.
+  function unitsForServiceType(serviceType) {
+    const service = settingsClient?.services.find((s) => s.serviceType === serviceType);
+    if (!service) return [];
+    const pool = settingsClient.capacityPools.find((p) => p.id === service.capacityPoolId);
+    return pool?.units ?? [];
+  }
+
+  // These are pure calendar dates (no time-of-day meaning) stored as UTC midnight —
+  // format in UTC so the displayed date doesn't shift with the viewer's local timezone.
+  function formatDate(iso) {
+    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  }
+
+  function vaccineBadge(vaccine) {
+    if (vaccine.missing) return '<span class="badge danger">Vaccine record missing</span>';
+    if (!vaccine.current) return `<span class="badge danger">Vaccine expired ${formatDate(vaccine.expirationDate)}</span>`;
+    return `<span class="badge ok">Vaccine current</span>`;
+  }
+
+  function bookingCardHtml(b, actionsHtml) {
+    const addOnsText = b.addOnsSelected.length
+      ? b.addOnsSelected.map((a) => `${a.name} x${a.qty}`).join(', ')
+      : 'None';
+    const ownerName = b.owner?.name || '(unknown owner)';
+    const ownerContact = [b.owner?.phone, b.owner?.email].filter(Boolean).join(' · ');
+    const dogName = b.dog?.name || '(unknown dog)';
+    const dogBreed = b.dog?.breed || '';
+
+    return `
+      <div class="card" id="booking-${b.id}">
+        <div class="request-header">
+          <div>
+            <h2>${dogName}${dogBreed ? ` — ${dogBreed}` : ''}</h2>
+            <div class="sub">${ownerName}${ownerContact ? ` · ${ownerContact}` : ''}</div>
+          </div>
+          ${vaccineBadge(b.vaccine)}
+        </div>
+        <div class="detail-grid">
+          <div>
+            <span class="field-label">Service</span>
+            <span class="field-value">${SERVICE_LABELS[b.serviceType] || b.serviceType}</span>
+          </div>
+          <div>
+            <span class="field-label">Dates</span>
+            <span class="field-value">${formatDate(b.startDate)} – ${formatDate(b.endDate)}</span>
+          </div>
+          <div>
+            <span class="field-label">Add-Ons</span>
+            <span class="field-value">${addOnsText}</span>
+          </div>
+          <div>
+            <span class="field-label">${b.unit ? 'Assigned Unit' : 'Locked Rate'}</span>
+            <span class="field-value">${b.unit?.name || `$${b.lockedRate.toFixed(2)}`}</span>
+          </div>
+        </div>
+        ${actionsHtml}
+      </div>
+    `;
+  }
+
+  function requestActionsHtml(b) {
+    const units = unitsForServiceType(b.serviceType);
+    const unitOptions = units.length
+      ? units.map((u) => `<option value="${u.id}">${u.name}</option>`).join('')
+      : '<option value="">No units configured</option>';
+
+    return `
+      <div class="actions">
+        <div class="action-group">
+          <select id="unit-${b.id}">${unitOptions}</select>
+          <button class="confirm-btn" onclick="confirmBooking('${b.id}')">Confirm</button>
+        </div>
+        <div class="action-group">
+          <textarea id="reason-${b.id}" placeholder="Denial reason (optional)"></textarea>
+          <button class="deny-btn" onclick="denyBooking('${b.id}')">Deny</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function confirmedActionsHtml(b) {
+    return `
+      <div class="actions single">
+        <button class="confirm-btn" onclick="checkInBooking('${b.id}')">Check In</button>
+      </div>
+    `;
+  }
+
+  function activeActionsHtml(b) {
+    return `
+      <div class="actions single">
+        <button class="confirm-btn" onclick="checkOutBooking('${b.id}')">Check Out</button>
+      </div>
+    `;
+  }
+
+  async function loadSection(status, containerId, actionsFn, emptyText) {
+    const list = document.getElementById(containerId);
+    const res = await fetch(API(`/api/bookings?status=${status}`));
+    if (!res.ok) {
+      list.innerHTML = '<p class="empty-state">Could not load.</p>';
+      return;
+    }
+    const { bookings } = await res.json();
+
+    if (!bookings.length) {
+      list.innerHTML = `<p class="empty-state">${emptyText}</p>`;
+      return;
+    }
+
+    list.innerHTML = bookings.map((b) => bookingCardHtml(b, actionsFn(b))).join('');
+  }
+
+  async function loadAll() {
+    const settingsRes = await fetch(API('/api/settings'));
+    settingsClient = (await settingsRes.json()).client;
+
+    await Promise.all([
+      loadSection('REQUESTED', 'requests-list', requestActionsHtml, 'No pending requests.'),
+      loadSection('CONFIRMED', 'confirmed-list', confirmedActionsHtml, 'No confirmed bookings awaiting check-in.'),
+      loadSection('ACTIVE', 'active-list', activeActionsHtml, 'No active stays awaiting check-out.'),
+    ]);
+  }
+
+  async function confirmBooking(id) {
+    const unitId = document.getElementById(`unit-${id}`).value;
+    if (!unitId) {
+      alert('Select a unit before confirming (add one in Settings if none exist yet).');
+      return;
+    }
+    const res = await fetch(API(`/api/bookings/${id}/confirm`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unitId }),
+    });
+    if (!res.ok) {
+      const { error } = await res.json();
+      alert(error);
+      return;
+    }
+    loadAll();
+  }
+
+  async function denyBooking(id) {
+    const denialReason = document.getElementById(`reason-${id}`).value.trim();
+    const res = await fetch(API(`/api/bookings/${id}/deny`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ denialReason: denialReason || null }),
+    });
+    if (!res.ok) {
+      const { error } = await res.json();
+      alert(error);
+      return;
+    }
+    loadAll();
+  }
+
+  async function checkInBooking(id) {
+    const res = await fetch(API(`/api/bookings/${id}/check-in`), { method: 'PUT' });
+    if (!res.ok) {
+      const { error } = await res.json();
+      alert(error);
+      return;
+    }
+    loadAll();
+  }
+
+  async function checkOutBooking(id) {
+    const res = await fetch(API(`/api/bookings/${id}/check-out`), { method: 'PUT' });
+    if (!res.ok) {
+      const { error } = await res.json();
+      alert(error);
+      return;
+    }
+    const { remainder } = await res.json();
+    alert(remainder > 0
+      ? `Checked out. A balance invoice for $${remainder.toFixed(2)} has been sent to the client.`
+      : 'Checked out. No balance due.');
+    loadAll();
+  }
+
+  loadAll();
+</script>
+</body>
+</html>

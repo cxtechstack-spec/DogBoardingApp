@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calendar</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      color: #1a1a1a;
+      background: #f5f5f5;
+      padding: 24px;
+    }
+
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+
+    h1 a {
+      font-size: 13px;
+      font-weight: 500;
+      color: #4f46e5;
+      margin-left: 8px;
+      text-decoration: none;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .toolbar-group { display: flex; gap: 8px; align-items: center; }
+
+    .range-label { font-size: 14px; font-weight: 600; min-width: 200px; }
+
+    button {
+      padding: 7px 12px;
+      border: 1px solid #d0d0d0;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    button:hover { background: #f5f4ff; }
+    button.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+
+    .cal-wrap {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      overflow-x: auto;
+      padding: 4px;
+    }
+
+    .cal-grid {
+      display: grid;
+      min-width: 600px;
+    }
+
+    .cal-cell {
+      padding: 8px 10px;
+      font-size: 12px;
+      border-bottom: 1px solid #eee;
+      border-right: 1px solid #f0f0f0;
+    }
+
+    .cal-header {
+      font-weight: 600;
+      color: #444;
+      background: #fafafa;
+      position: sticky;
+      top: 0;
+    }
+
+    .cal-pool-header {
+      background: #f5f4ff;
+      color: #4338ca;
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      padding: 6px 10px;
+      border-bottom: 1px solid #e0defc;
+      border-top: 1px solid #e0defc;
+    }
+
+    .cal-unit-label {
+      font-weight: 500;
+      font-size: 13px;
+      padding: 10px;
+      border-bottom: 1px solid #f0f0f0;
+      border-right: 1px solid #f0f0f0;
+      display: flex;
+      align-items: center;
+    }
+
+    .cal-day-cell {
+      border-bottom: 1px solid #f0f0f0;
+      border-right: 1px solid #f0f0f0;
+      min-height: 44px;
+    }
+
+    .cal-booking {
+      margin: 4px 3px;
+      padding: 6px 8px;
+      background: #4f46e5;
+      color: #fff;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 500;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      z-index: 1;
+    }
+
+    .cal-booking.active-status { background: #16a34a; }
+
+    .empty-state { color: #888; font-size: 13px; padding: 16px; }
+  </style>
+</head>
+<body>
+
+<h1>Calendar <a id="bookings-link" href="#">← Back to Bookings</a></h1>
+
+<div class="toolbar">
+  <div class="toolbar-group">
+    <button id="prev-btn" onclick="shiftRange(-1)">← Prev</button>
+    <button id="next-btn" onclick="shiftRange(1)">Next →</button>
+    <span class="range-label" id="range-label"></span>
+  </div>
+  <div class="toolbar-group">
+    <button id="day-btn" onclick="setViewMode('day')">Day</button>
+    <button id="week-btn" onclick="setViewMode('week')">Week</button>
+  </div>
+</div>
+
+<div class="cal-wrap">
+  <div id="cal-grid" class="cal-grid">
+    <p class="empty-state">Loading…</p>
+  </div>
+</div>
+
+<script>
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  const params = new URLSearchParams(window.location.search);
+  const locationId = params.get('location_id') || 'dev-test';
+  const API = (path) => `${path}${path.includes('?') ? '&' : '?'}location_id=${encodeURIComponent(locationId)}`;
+
+  document.getElementById('bookings-link').href = `requests.html?location_id=${encodeURIComponent(locationId)}`;
+
+  function todayUTC() {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  }
+
+  const state = {
+    viewMode: 'week', // 'day' | 'week'
+    rangeStart: todayUTC(),
+  };
+
+  function rangeLength() {
+    return state.viewMode === 'week' ? 7 : 1;
+  }
+
+  function rangeDays() {
+    const n = rangeLength();
+    return Array.from({ length: n }, (_, i) => new Date(state.rangeStart.getTime() + i * DAY_MS));
+  }
+
+  function rangeEnd() {
+    const days = rangeDays();
+    return days[days.length - 1];
+  }
+
+  function isoDate(d) {
+    return d.toISOString().slice(0, 10);
+  }
+
+  function formatDayLabel(d) {
+    return `${DAY_LABELS[d.getUTCDay()]} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  }
+
+  function formatRangeLabel() {
+    const days = rangeDays();
+    const first = days[0];
+    const last = days[days.length - 1];
+    const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    return days.length === 1 ? fmt(first) : `${fmt(first)} – ${fmt(last)}`;
+  }
+
+  function shiftRange(direction) {
+    const step = rangeLength() * direction;
+    state.rangeStart = new Date(state.rangeStart.getTime() + step * DAY_MS);
+    loadCalendar();
+  }
+
+  function setViewMode(mode) {
+    state.viewMode = mode;
+    document.getElementById('day-btn').classList.toggle('active', mode === 'day');
+    document.getElementById('week-btn').classList.toggle('active', mode === 'week');
+    loadCalendar();
+  }
+
+  function daysBetween(a, b) {
+    return Math.round((b.getTime() - a.getTime()) / DAY_MS);
+  }
+
+  async function loadCalendar() {
+    document.getElementById('range-label').textContent = formatRangeLabel();
+
+    const days = rangeDays();
+    const start = isoDate(days[0]);
+    const end = isoDate(rangeEnd());
+
+    const res = await fetch(API(`/api/bookings/calendar?start=${start}&end=${end}`));
+    const grid = document.getElementById('cal-grid');
+    if (!res.ok) {
+      grid.innerHTML = '<p class="empty-state">Could not load calendar.</p>';
+      return;
+    }
+    const { bookings, pools } = await res.json();
+
+    if (!pools.some((p) => p.units.length)) {
+      grid.innerHTML = '<p class="empty-state">No units configured yet — add some in Settings first.</p>';
+      return;
+    }
+
+    renderGrid(grid, days, pools, bookings);
+  }
+
+  function renderGrid(grid, days, pools, bookings) {
+    const n = days.length;
+    grid.style.gridTemplateColumns = `140px repeat(${n}, 1fr)`;
+
+    // Build the row list: a pool-header row, then one row per unit in that pool.
+    const rows = [];
+    pools.forEach((pool) => {
+      if (!pool.units.length) return;
+      rows.push({ type: 'pool', name: pool.name });
+      pool.units.forEach((unit) => rows.push({ type: 'unit', id: unit.id, name: unit.name }));
+    });
+
+    const unitRowIndex = new Map();
+    rows.forEach((row, i) => { if (row.type === 'unit') unitRowIndex.set(row.id, i + 2); }); // +2: header row is 1
+
+    const cells = [];
+
+    // Header row (dates)
+    cells.push(`<div class="cal-cell cal-header" style="grid-column:1; grid-row:1"></div>`);
+    days.forEach((d, i) => {
+      cells.push(`<div class="cal-cell cal-header" style="grid-column:${i + 2}; grid-row:1">${formatDayLabel(d)}</div>`);
+    });
+
+    // Row labels + background day cells
+    rows.forEach((row, i) => {
+      const gridRow = i + 2;
+      if (row.type === 'pool') {
+        cells.push(`<div class="cal-pool-header" style="grid-column:1/-1; grid-row:${gridRow}">${row.name}</div>`);
+      } else {
+        cells.push(`<div class="cal-unit-label" style="grid-column:1; grid-row:${gridRow}">${row.name}</div>`);
+        for (let c = 0; c < n; c++) {
+          cells.push(`<div class="cal-day-cell" style="grid-column:${c + 2}; grid-row:${gridRow}"></div>`);
+        }
+      }
+    });
+
+    // Booking bars
+    const rangeStart = days[0];
+    const rangeLast = days[days.length - 1];
+    bookings.forEach((b) => {
+      const gridRow = unitRowIndex.get(b.unit?.id);
+      if (!gridRow) return;
+
+      const bStart = new Date(b.startDate);
+      const bEnd = new Date(b.endDate);
+      const clippedStart = bStart < rangeStart ? rangeStart : bStart;
+      const clippedEnd = bEnd > rangeLast ? rangeLast : bEnd;
+      if (clippedStart > clippedEnd) return;
+
+      const colStart = daysBetween(rangeStart, clippedStart) + 2;
+      const colEnd = daysBetween(rangeStart, clippedEnd) + 3;
+      const dogName = b.dog?.name || 'Unknown dog';
+      const statusClass = b.status === 'ACTIVE' ? 'active-status' : '';
+
+      cells.push(`
+        <div class="cal-booking ${statusClass}" style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType}">
+          ${dogName}
+        </div>
+      `);
+    });
+
+    grid.innerHTML = cells.join('');
+  }
+
+  const SERVICE_LABELS = { BOARDING: 'Boarding', DAY_CARE: 'Day Care', DAY_TRAINING: 'Day Training' };
+
+  setViewMode('week');
+</script>
+</body>
+</html>

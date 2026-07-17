@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Request a Booking</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      color: #1a1a1a;
+      background: #f5f5f5;
+      padding: 24px;
+      max-width: 560px;
+      margin: 0 auto;
+    }
+
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 24px; }
+    h2 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .step { display: none; }
+    .step.active { display: block; }
+
+    .field-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .field-row.full { grid-template-columns: 1fr; }
+
+    label.field-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: #555;
+      margin-bottom: 4px;
+    }
+
+    input[type="text"], input[type="email"], input[type="tel"],
+    input[type="number"], input[type="date"], select, textarea {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #d0d0d0;
+      border-radius: 6px;
+      font-size: 13px;
+      background: #fff;
+      font-family: inherit;
+    }
+
+    textarea { resize: vertical; min-height: 50px; }
+
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: #4f46e5;
+      box-shadow: 0 0 0 2px rgba(79,70,229,0.15);
+    }
+
+    .btn {
+      padding: 9px 16px;
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .btn:hover { background: #4338ca; }
+    .btn:disabled { background: #c7c7d1; cursor: not-allowed; }
+    .btn-link { background: none; color: #666; padding: 9px 4px; font-weight: 500; }
+    .btn-link:hover { color: #333; background: none; text-decoration: underline; }
+
+    .btn-row { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
+
+    .option-card {
+      border: 1px solid #d0d0d0;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .option-card.selected { border-color: #4f46e5; background: #f5f4ff; }
+    .option-card .option-title { font-weight: 600; font-size: 13px; }
+    .option-card .option-sub { font-size: 12px; color: #666; }
+
+    .addon-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .addon-row:last-child { border-bottom: none; }
+    .addon-row .addon-name { flex: 1; font-size: 13px; }
+    .addon-row .addon-price { color: #666; font-size: 12px; }
+    .addon-row input[type="number"] { width: 60px; }
+
+    .error-text { color: #dc2626; font-size: 12px; margin-top: 8px; }
+    .hint-text { color: #666; font-size: 12px; margin-top: 8px; }
+
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      font-size: 13px;
+    }
+
+    .summary-row.total { font-weight: 600; border-top: 1px solid #eee; margin-top: 8px; padding-top: 10px; }
+
+    .payment-placeholder {
+      border: 1px dashed #d0d0d0;
+      border-radius: 6px;
+      padding: 16px;
+      text-align: center;
+      color: #888;
+      font-size: 13px;
+      margin: 16px 0;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Request a Booking</h1>
+<p id="load-error" class="error-text" style="display:none"></p>
+
+<!-- STEP 1: Owner + Dog -->
+<div class="card step active" id="step-owner">
+  <h2>Your Info</h2>
+  <div class="field-row">
+    <div>
+      <label class="field-label">First Name</label>
+      <input type="text" id="owner-firstName">
+    </div>
+    <div>
+      <label class="field-label">Last Name</label>
+      <input type="text" id="owner-lastName">
+    </div>
+  </div>
+  <div class="field-row">
+    <div>
+      <label class="field-label">Phone</label>
+      <input type="tel" id="owner-phone">
+    </div>
+    <div>
+      <label class="field-label">Email</label>
+      <input type="email" id="owner-email">
+    </div>
+  </div>
+  <p class="hint-text" id="owner-hint">Enter your phone or email so we can find your account (or create one).</p>
+  <div class="btn-row">
+    <span></span>
+    <button class="btn" onclick="lookupOwner()">Continue</button>
+  </div>
+</div>
+
+<!-- STEP 1b: Dog picker -->
+<div class="card step" id="step-dog">
+  <h2>Select Your Dog</h2>
+  <div id="dog-options"></div>
+  <div id="new-dog-fields" style="display:none">
+    <div class="field-row full">
+      <div>
+        <label class="field-label">Dog Name</label>
+        <input type="text" id="dog-name">
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label class="field-label">Breed</label>
+        <input type="text" id="dog-breed">
+      </div>
+      <div>
+        <label class="field-label">Notes (optional)</label>
+        <input type="text" id="dog-notes">
+      </div>
+    </div>
+  </div>
+  <p class="error-text" id="dog-error" style="display:none"></p>
+  <div class="btn-row">
+    <button class="btn-link" onclick="showStep('owner')">Back</button>
+    <button class="btn" onclick="confirmDog()">Continue</button>
+  </div>
+</div>
+
+<!-- STEP 2: Service -->
+<div class="card step" id="step-service">
+  <h2>Select a Service</h2>
+  <div id="service-options"></div>
+  <div class="btn-row">
+    <button class="btn-link" onclick="showStep('dog')">Back</button>
+    <span></span>
+  </div>
+</div>
+
+<!-- STEP 3: Dates -->
+<div class="card step" id="step-dates">
+  <h2>Select Dates</h2>
+  <div class="field-row">
+    <div>
+      <label class="field-label">Start Date</label>
+      <input type="date" id="start-date">
+    </div>
+    <div>
+      <label class="field-label">End Date</label>
+      <input type="date" id="end-date">
+    </div>
+  </div>
+  <p class="error-text" id="dates-error" style="display:none"></p>
+  <div class="btn-row">
+    <button class="btn-link" onclick="showStep('service')">Back</button>
+    <button class="btn" onclick="checkDatesAndContinue()">Continue</button>
+  </div>
+</div>
+
+<!-- STEP 4: Add-ons -->
+<div class="card step" id="step-addons">
+  <h2>Add-Ons (Optional)</h2>
+  <div id="addon-options"></div>
+  <p class="hint-text" id="addon-cap-hint"></p>
+  <div class="btn-row">
+    <button class="btn-link" onclick="showStep('dates')">Back</button>
+    <button class="btn" onclick="goToReview()">Continue</button>
+  </div>
+</div>
+
+<!-- STEP 5: Review + Payment -->
+<div class="card step" id="step-review">
+  <h2>Review &amp; Confirm</h2>
+  <div id="review-summary"></div>
+
+  <div id="payment-section" style="display:none">
+    <div class="payment-placeholder" id="payment-status">
+      A deposit is required to submit your request. Click below to pay — a payment page will open in a new tab.
+    </div>
+    <div class="btn-row">
+      <span></span>
+      <button class="btn" id="pay-btn" onclick="payDeposit()">Pay Deposit</button>
+    </div>
+  </div>
+
+  <p class="error-text" id="submit-error" style="display:none"></p>
+  <div class="btn-row">
+    <button class="btn-link" onclick="showStep('addons')">Back</button>
+    <button class="btn" id="submit-btn" onclick="submitBooking()" disabled>Submit Request</button>
+  </div>
+</div>
+
+<!-- STEP 6: Done -->
+<div class="card step" id="step-done">
+  <h2>Request Submitted</h2>
+  <p>Thanks! Your request has been sent to the business for review. You'll hear back once it's confirmed.</p>
+</div>
+
+<script>
+  const SERVICE_LABELS = { BOARDING: 'Boarding', DAY_CARE: 'Day Care', DAY_TRAINING: 'Day Training' };
+
+  const params = new URLSearchParams(window.location.search);
+  const locationId = params.get('location_id');
+  const API = (path) => `${path}${path.includes('?') ? '&' : '?'}location_id=${encodeURIComponent(locationId)}`;
+
+  const state = {
+    client: null,
+    contact: null,
+    dogs: [],
+    selectedDogId: null,
+    newDog: null,
+    ghlDogObjectId: null,
+    serviceType: null,
+    service: null,
+    startDate: null,
+    endDate: null,
+    selectedAddOns: {}, // addOnId -> qty
+    quote: null,
+    invoiceId: null,
+    paymentUrl: null,
+  };
+
+  function showStep(name) {
+    document.querySelectorAll('.step').forEach((el) => el.classList.remove('active'));
+    document.getElementById(`step-${name}`).classList.add('active');
+  }
+
+  function showLoadError(message) {
+    const el = document.getElementById('load-error');
+    el.textContent = message;
+    el.style.display = 'block';
+  }
+
+  async function init() {
+    if (!locationId) {
+      showLoadError('This link is missing required information. Please use the link provided by the business.');
+      return;
+    }
+    const res = await fetch(API('/api/settings'));
+    if (!res.ok) {
+      showLoadError('Could not load booking info for this business.');
+      return;
+    }
+    const { client } = await res.json();
+    if (!client.services.length) {
+      showLoadError('This business has no services available for booking yet.');
+      return;
+    }
+    state.client = client;
+  }
+
+  async function lookupOwner() {
+    const firstName = document.getElementById('owner-firstName').value.trim();
+    const lastName = document.getElementById('owner-lastName').value.trim();
+    const phone = document.getElementById('owner-phone').value.trim();
+    const email = document.getElementById('owner-email').value.trim();
+
+    if (!phone && !email) {
+      document.getElementById('owner-hint').textContent = 'Phone or email is required.';
+      return;
+    }
+
+    const res = await fetch(API('/api/bookings/contacts'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ firstName, lastName, phone, email }),
+    });
+    if (!res.ok) {
+      document.getElementById('owner-hint').textContent = 'Something went wrong looking up your info. Please try again.';
+      return;
+    }
+
+    const { contact, dogs } = await res.json();
+    state.contact = contact;
+    state.dogs = dogs;
+    renderDogOptions();
+    showStep('dog');
+  }
+
+  function renderDogOptions() {
+    const container = document.getElementById('dog-options');
+    const newDogFields = document.getElementById('new-dog-fields');
+    state.selectedDogId = null;
+
+    const dogCards = state.dogs.map((dog) => `
+      <div class="option-card" data-dog-id="${dog.id}" onclick="selectDog('${dog.id}')">
+        <div>
+          <div class="option-title">${dog.name ?? 'Unnamed dog'}</div>
+          <div class="option-sub">${dog.breed ?? ''}</div>
+        </div>
+      </div>
+    `).join('');
+
+    const addNewCard = `
+      <div class="option-card" data-dog-id="__new__" onclick="selectDog('__new__')">
+        <div class="option-title">+ Add a new dog</div>
+      </div>
+    `;
+
+    container.innerHTML = dogCards + addNewCard;
+    newDogFields.style.display = 'none';
+
+    if (!state.dogs.length) {
+      selectDog('__new__');
+    }
+  }
+
+  function selectDog(dogId) {
+    state.selectedDogId = dogId;
+    document.querySelectorAll('#dog-options .option-card').forEach((el) => {
+      el.classList.toggle('selected', el.dataset.dogId === dogId);
+    });
+    document.getElementById('new-dog-fields').style.display = dogId === '__new__' ? 'block' : 'none';
+  }
+
+  async function confirmDog() {
+    const errorEl = document.getElementById('dog-error');
+    errorEl.style.display = 'none';
+
+    if (!state.selectedDogId) {
+      errorEl.textContent = 'Please select a dog.';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    if (state.selectedDogId === '__new__') {
+      const name = document.getElementById('dog-name').value.trim();
+      const breed = document.getElementById('dog-breed').value.trim();
+      const notes = document.getElementById('dog-notes').value.trim();
+      if (!name) {
+        errorEl.textContent = 'Dog name is required.';
+        errorEl.style.display = 'block';
+        return;
+      }
+      const res = await fetch(API('/api/bookings/dogs'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerContactId: state.contact.id, name, breed, notes }),
+      });
+      if (!res.ok) {
+        errorEl.textContent = 'Could not save your dog\'s info. Please try again.';
+        errorEl.style.display = 'block';
+        return;
+      }
+      const { dog } = await res.json();
+      state.ghlDogObjectId = dog.id;
+    } else {
+      state.ghlDogObjectId = state.selectedDogId;
+    }
+
+    renderServiceOptions();
+    showStep('service');
+  }
+
+  function renderServiceOptions() {
+    const container = document.getElementById('service-options');
+    container.innerHTML = state.client.services.map((svc) => `
+      <div class="option-card" data-service="${svc.serviceType}" onclick="selectService('${svc.serviceType}')">
+        <div>
+          <div class="option-title">${SERVICE_LABELS[svc.serviceType] || svc.serviceType}</div>
+          <div class="option-sub">$${svc.baseRate.toFixed(2)} / ${svc.billingUnit.toLowerCase()}</div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function selectService(serviceType) {
+    state.serviceType = serviceType;
+    state.service = state.client.services.find((s) => s.serviceType === serviceType);
+    document.querySelectorAll('#service-options .option-card').forEach((el) => {
+      el.classList.toggle('selected', el.dataset.service === serviceType);
+    });
+    showStep('dates');
+  }
+
+  async function checkDatesAndContinue() {
+    const errorEl = document.getElementById('dates-error');
+    errorEl.style.display = 'none';
+
+    const startDate = document.getElementById('start-date').value;
+    const endDate = document.getElementById('end-date').value;
+    if (!startDate || !endDate) {
+      errorEl.textContent = 'Please select both a start and end date.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    if (endDate < startDate) {
+      errorEl.textContent = 'End date must be on or after the start date.';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    const res = await fetch(API(`/api/bookings/availability?serviceType=${state.serviceType}&startDate=${startDate}&endDate=${endDate}`));
+    const result = await res.json();
+    if (!res.ok || !result.available) {
+      errorEl.textContent = result.error || `No availability on ${result.blockedDate}. Please choose different dates.`;
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    state.startDate = startDate;
+    state.endDate = endDate;
+    renderAddonOptions();
+    showStep('addons');
+  }
+
+  function addOnQtyTotal() {
+    return Object.values(state.selectedAddOns).reduce((sum, qty) => sum + qty, 0);
+  }
+
+  function renderAddonOptions() {
+    const container = document.getElementById('addon-options');
+    const addOns = state.client.addOns;
+
+    if (!addOns.length) {
+      container.innerHTML = '<p class="hint-text">No add-ons available.</p>';
+      document.getElementById('addon-cap-hint').textContent = '';
+      return;
+    }
+
+    container.innerHTML = addOns.map((a) => `
+      <div class="addon-row">
+        <span class="addon-name">${a.name}</span>
+        <span class="addon-price">$${a.price.toFixed(2)}</span>
+        <input type="number" min="0" value="0" id="addon-qty-${a.id}" onchange="updateAddOnQty('${a.id}')">
+      </div>
+    `).join('');
+
+    document.getElementById('addon-cap-hint').textContent = `Max ${state.client.maxAddOnsPerDay} add-ons per day.`;
+  }
+
+  function updateAddOnQty(addOnId) {
+    const input = document.getElementById(`addon-qty-${addOnId}`);
+    let qty = Math.max(0, parseInt(input.value) || 0);
+
+    const otherTotal = addOnQtyTotal() - (state.selectedAddOns[addOnId] || 0);
+    const maxAllowed = state.client.maxAddOnsPerDay - otherTotal;
+    if (qty > maxAllowed) {
+      qty = Math.max(0, maxAllowed);
+      input.value = qty;
+    }
+
+    if (qty > 0) {
+      state.selectedAddOns[addOnId] = qty;
+    } else {
+      delete state.selectedAddOns[addOnId];
+    }
+  }
+
+  function computeQuote() {
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const dayDiff = Math.round((new Date(state.endDate) - new Date(state.startDate)) / msPerDay);
+    // NIGHT billing counts nights stayed (checkout day isn't a night); DAY billing counts inclusive days.
+    const units = Math.max(1, state.service.billingUnit === 'NIGHT' ? dayDiff : dayDiff + 1);
+    const serviceCost = state.service.baseRate * units;
+
+    const addOnLines = Object.entries(state.selectedAddOns).map(([addOnId, qty]) => {
+      const addOn = state.client.addOns.find((a) => a.id === addOnId);
+      return { name: addOn.name, qty, lineTotal: addOn.price * qty };
+    });
+    const addOnCost = addOnLines.reduce((sum, l) => sum + l.lineTotal, 0);
+
+    const subtotal = serviceCost + addOnCost;
+    let deposit = 0;
+    if (state.service.depositType === 'PERCENT') deposit = subtotal * (state.service.depositValue / 100);
+    if (state.service.depositType === 'FLAT') deposit = state.service.depositValue;
+
+    return { units, serviceCost, addOnLines, addOnCost, subtotal, deposit };
+  }
+
+  function goToReview() {
+    const quote = computeQuote();
+    state.quote = quote;
+    state.invoiceId = null;
+    state.paymentUrl = null;
+
+    const summary = document.getElementById('review-summary');
+    summary.innerHTML = `
+      <div class="summary-row"><span>${SERVICE_LABELS[state.serviceType]} (${quote.units} ${state.service.billingUnit.toLowerCase()}${quote.units > 1 ? 's' : ''})</span><span>$${quote.serviceCost.toFixed(2)}</span></div>
+      ${quote.addOnLines.map((l) => `<div class="summary-row"><span>${l.name} x${l.qty}</span><span>$${l.lineTotal.toFixed(2)}</span></div>`).join('')}
+      <div class="summary-row total"><span>Estimated Total</span><span>$${quote.subtotal.toFixed(2)}</span></div>
+      <div class="summary-row"><span>Deposit Due Now</span><span>$${quote.deposit.toFixed(2)}</span></div>
+    `;
+
+    const paymentSection = document.getElementById('payment-section');
+    const submitBtn = document.getElementById('submit-btn');
+    if (quote.deposit > 0) {
+      paymentSection.style.display = 'block';
+      document.getElementById('payment-status').textContent = 'A deposit is required to submit your request. Click below to pay — a payment page will open in a new tab.';
+      document.getElementById('pay-btn').disabled = false;
+      document.getElementById('pay-btn').textContent = 'Pay Deposit';
+      submitBtn.disabled = true;
+    } else {
+      paymentSection.style.display = 'none';
+      submitBtn.disabled = false;
+    }
+
+    showStep('review');
+  }
+
+  async function payDeposit() {
+    const payBtn = document.getElementById('pay-btn');
+    const statusEl = document.getElementById('payment-status');
+
+    // Already have an invoice from a previous click — just reopen it instead
+    // of creating a new one each time.
+    if (state.invoiceId && state.paymentUrl) {
+      window.open(state.paymentUrl, '_blank');
+      return;
+    }
+
+    payBtn.disabled = true;
+    payBtn.textContent = 'Creating invoice…';
+
+    const res = await fetch(API('/api/bookings/invoices'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serviceType: state.serviceType,
+        startDate: state.startDate,
+        endDate: state.endDate,
+        addOnsSelected: Object.entries(state.selectedAddOns).map(([addOnId, qty]) => ({ addOnId, qty })),
+        ghlOwnerContactId: state.contact.id,
+      }),
+    });
+
+    if (!res.ok) {
+      const { error } = await res.json();
+      statusEl.textContent = error;
+      payBtn.disabled = false;
+      payBtn.textContent = 'Pay Deposit';
+      return;
+    }
+
+    const { invoiceId, paymentUrl } = await res.json();
+    state.invoiceId = invoiceId;
+    state.paymentUrl = paymentUrl;
+
+    if (paymentUrl) {
+      window.open(paymentUrl, '_blank');
+      statusEl.textContent = 'Complete payment in the new tab, then click Submit Request below.';
+    } else {
+      statusEl.textContent = 'Your invoice was created but we couldn\'t open it automatically — check your email, then click Submit Request below once paid.';
+    }
+    payBtn.textContent = 'Reopen Payment Page';
+    payBtn.disabled = false;
+    document.getElementById('submit-btn').disabled = false;
+  }
+
+  async function submitBooking() {
+    const errorEl = document.getElementById('submit-error');
+    errorEl.style.display = 'none';
+
+    const res = await fetch(API('/api/bookings'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serviceType: state.serviceType,
+        startDate: state.startDate,
+        endDate: state.endDate,
+        addOnsSelected: Object.entries(state.selectedAddOns).map(([addOnId, qty]) => ({ addOnId, qty })),
+        ghlDogObjectId: state.ghlDogObjectId,
+        ghlOwnerContactId: state.contact.id,
+        invoiceId: state.invoiceId,
+      }),
+    });
+
+    if (!res.ok) {
+      const { error } = await res.json();
+      errorEl.textContent = error;
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    showStep('done');
+  }
+
+  init();
+</script>
+</body>
+</html>
