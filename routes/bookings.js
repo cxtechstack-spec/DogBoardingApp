@@ -10,6 +10,7 @@ import { decrypt } from '../lib/crypto.js';
 import { checkPoolAvailability } from '../lib/availability.js';
 import { computeBookingQuote, computeStayTotalFromBooking } from '../lib/quote.js';
 import { createAndSendInvoice, getInvoiceStatus } from '../lib/ghl-invoices.js';
+import { notifyStaff } from '../lib/ghl-notifications.js';
 import {
   upsertContact,
   findDogsForContact,
@@ -64,6 +65,25 @@ async function enrichBooking(booking, token) {
 }
 
 const SERVICE_LABELS = { BOARDING: 'Boarding', DAY_CARE: 'Day Care', DAY_TRAINING: 'Day Training' };
+
+// Used to build a tap-to-open link in the staff notification text.
+const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+
+// Best-effort — a failed notification never fails or delays the booking itself.
+async function notifyBookingRequest({ client, booking, locationId, token }) {
+  const dogRecord = await getDogRecord(booking.ghlDogObjectId, token).catch(() => null);
+  const dogName = dogRecord ? dogSummaryFromRecord(dogRecord).name : 'a dog';
+  const dateRange = `${booking.startDate.toISOString().slice(0, 10)} to ${booking.endDate.toISOString().slice(0, 10)}`;
+  const message = `New booking request: ${SERVICE_LABELS[booking.serviceType] || booking.serviceType} for ${dogName}, ${dateRange}. Review: ${APP_BASE_URL}/requests.html?location_id=${locationId}`;
+
+  await notifyStaff({
+    locationId,
+    staffName: client.staffNotifyName || 'Staff',
+    staffPhone: client.staffNotifyPhone,
+    message,
+    token,
+  });
+}
 
 // Shared validation for both invoice creation and booking creation — availability
 // can change between the two steps, so both need to check it independently.
@@ -287,6 +307,13 @@ router.post('/', asyncHandler(async (req, res) => {
   });
 
   res.status(201).json({ booking });
+
+  // Fire-and-forget — staff should get the booking response fast regardless of SMS delivery.
+  if (client.staffNotifyPhone) {
+    notifyBookingRequest({ client, booking, locationId, token }).catch((err) => {
+      console.warn(`Staff notification failed: ${err.message}`);
+    });
+  }
 }));
 
 // GET /api/bookings?location_id=&status=REQUESTED

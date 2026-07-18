@@ -22,6 +22,10 @@ model Client {
   // AES-256-GCM ciphertext (see lib/crypto.js) — this business's own GHL Private
   // Integration Token. Null until they complete the GHL Connection step in Settings.
   ghlApiTokenEncrypted String?
+  // Who gets texted when a new booking request comes in — a name for display
+  // and the phone number itself. Null means no notification is sent.
+  staffNotifyName      String?
+  staffNotifyPhone     String?
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 }

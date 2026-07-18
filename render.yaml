@@ -10,3 +10,5 @@ services:
         sync: false
       - key: ENCRYPTION_KEY
         sync: false
+      - key: APP_BASE_URL
+        value: https://dog-boarding-app.onrender.com

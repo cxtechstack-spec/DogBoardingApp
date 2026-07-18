@@ -195,6 +195,26 @@
   <div id="ghl-connection-indicator" style="margin-top:10px; font-size:13px;"></div>
 </div>
 
+<!-- STAFF NOTIFICATIONS -->
+<div class="card">
+  <h2>Staff Notifications</h2>
+  <p style="color:#666; font-size:12px; margin-bottom:12px;">
+    Who gets a text when a new booking request comes in. Leave the phone blank to turn this off.
+  </p>
+  <div class="field-row">
+    <div>
+      <label class="field-label">Staff Name</label>
+      <input type="text" id="staff-notify-name" placeholder="e.g. Jamie">
+    </div>
+    <div>
+      <label class="field-label">Staff Phone</label>
+      <input type="text" id="staff-notify-phone" placeholder="+15551234567">
+    </div>
+  </div>
+  <button class="save-btn" onclick="saveNotifications()">Save</button>
+  <span class="save-status" id="status-notifications"></span>
+</div>
+
 <!-- TOTAL CAPACITY -->
 <div class="card">
   <h2>Total Capacity</h2>
@@ -514,11 +534,29 @@
     renderGhlConnectionStatus(true);
   }
 
+  async function saveNotifications() {
+    const status = document.getElementById('status-notifications');
+    const staffNotifyName = document.getElementById('staff-notify-name').value.trim();
+    const staffNotifyPhone = document.getElementById('staff-notify-phone').value.trim();
+
+    status.textContent = 'Saving…';
+    const res = await fetch(API('/api/settings/notifications'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staffNotifyName, staffNotifyPhone }),
+    });
+
+    status.textContent = res.ok ? '✓ Saved' : '✗ Error';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
+
   async function loadSettings() {
     const res = await fetch(API('/api/settings'));
     const { client } = await res.json();
 
     renderGhlConnectionStatus(client.ghlConnected);
+    document.getElementById('staff-notify-name').value = client.staffNotifyName || '';
+    document.getElementById('staff-notify-phone').value = client.staffNotifyPhone || '';
     document.getElementById('max-addons-per-day').value = client.maxAddOnsPerDay;
 
     renderCapacities(client.capacityPools);

@@ -283,12 +283,33 @@ router.put('/max-addons-per-day', asyncHandler(async (req, res) => {
   const { maxAddOnsPerDay } = req.body;
   const client = await getOrCreateClient(locationId);
 
-  const updated = await db.client.update({
+  const { ghlApiTokenEncrypted, ...updated } = await db.client.update({
     where: { id: client.id },
     data: { maxAddOnsPerDay: parseInt(maxAddOnsPerDay) },
   });
 
-  res.json({ client: updated });
+  res.json({ client: { ...updated, ghlConnected: !!ghlApiTokenEncrypted } });
+}));
+
+// PUT /api/settings/notifications
+// Who gets texted when a new booking request comes in. Both fields optional —
+// clearing the phone turns notifications off for this client.
+router.put('/notifications', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const { staffNotifyName, staffNotifyPhone } = req.body;
+  const client = await getOrCreateClient(locationId);
+
+  const { ghlApiTokenEncrypted, ...updated } = await db.client.update({
+    where: { id: client.id },
+    data: {
+      staffNotifyName: staffNotifyName || null,
+      staffNotifyPhone: staffNotifyPhone || null,
+    },
+  });
+
+  res.json({ client: { ...updated, ghlConnected: !!ghlApiTokenEncrypted } });
 }));
 
 // DELETE /api/settings/addons/:id
