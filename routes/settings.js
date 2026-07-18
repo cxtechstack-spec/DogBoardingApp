@@ -9,7 +9,8 @@ import { Router } from 'express';
 import db from '../lib/db.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { ghlRequest } from '../lib/ghl.js';
-import { encrypt } from '../lib/crypto.js';
+import { encrypt, decrypt } from '../lib/crypto.js';
+import { listCustomObjectTypes, getObjectFields } from '../lib/ghl-contacts.js';
 
 const router = Router();
 
@@ -57,6 +58,75 @@ router.put('/ghl-connection', asyncHandler(async (req, res) => {
   });
 
   res.json({ ghlConnected: true });
+}));
+
+// Same guard as routes/bookings.js — these endpoints call GHL on the business's
+// behalf, so they need that business's own connected token.
+function requireGhlToken(client) {
+  if (!client.ghlApiTokenEncrypted) {
+    const err = new Error('Connect your GHL account first');
+    err.statusCode = 400;
+    throw err;
+  }
+  return decrypt(client.ghlApiTokenEncrypted);
+}
+
+// GET /api/settings/dog-object-types
+// Lists this business's own custom object types, so they can pick which one is
+// their Dog object instead of us guessing/hardcoding a schema key.
+router.get('/dog-object-types', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const client = await getOrCreateClient(locationId);
+  const token = requireGhlToken(client);
+
+  const types = await listCustomObjectTypes({ locationId, token });
+  res.json({ types });
+}));
+
+// GET /api/settings/dog-object-fields?objectKey=
+// Lists the real fields on a specific object, so name/breed/notes/vaccine fields
+// can be picked from what's actually there instead of typed in blind.
+router.get('/dog-object-fields', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  const { objectKey } = req.query;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+  if (!objectKey) return res.status(400).json({ error: 'objectKey required' });
+
+  const client = await getOrCreateClient(locationId);
+  const token = requireGhlToken(client);
+
+  const fields = await getObjectFields({ objectKey, locationId, token });
+  res.json({ fields });
+}));
+
+// PUT /api/settings/dog-object-mapping
+// Saves which object + fields represent a dog for this business. Name is
+// required; breed/notes/vaccine fields are all optional (zero or more vaccine
+// fields — see lib/ghl-contacts.js's vaccineStatusFromRecord for why).
+router.put('/dog-object-mapping', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const { dogObjectKey, dogNameFieldKey, dogBreedFieldKey, dogNotesFieldKey, dogVaccineFieldKeys } = req.body;
+  if (!dogObjectKey || !dogNameFieldKey) {
+    return res.status(400).json({ error: 'dogObjectKey and dogNameFieldKey required' });
+  }
+
+  const client = await getOrCreateClient(locationId);
+  const { ghlApiTokenEncrypted, ...updated } = await db.client.update({
+    where: { id: client.id },
+    data: {
+      dogObjectKey,
+      dogNameFieldKey,
+      dogBreedFieldKey: dogBreedFieldKey || null,
+      dogNotesFieldKey: dogNotesFieldKey || null,
+      dogVaccineFieldKeys: JSON.stringify(Array.isArray(dogVaccineFieldKeys) ? dogVaccineFieldKeys : []),
+    },
+  });
+
+  res.json({ client: { ...updated, ghlConnected: !!ghlApiTokenEncrypted } });
 }));
 
 // PUT /api/settings/services/:serviceType

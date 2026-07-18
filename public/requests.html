@@ -58,6 +58,7 @@
 
     .badge.danger { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
     .badge.ok { background: #f0fdf4; color: #16a34a; border: 1px solid #86efac; }
+    .badge.neutral { background: #f5f5f5; color: #777; border: 1px solid #ddd; }
 
     .detail-grid {
       display: grid;
@@ -174,6 +175,7 @@
   }
 
   function vaccineBadge(vaccine) {
+    if (!vaccine.tracked) return '<span class="badge neutral">Vaccines not tracked</span>';
     if (vaccine.missing) return '<span class="badge danger">Vaccine record missing</span>';
     if (!vaccine.current) return `<span class="badge danger">Vaccine expired ${formatDate(vaccine.expirationDate)}</span>`;
     return `<span class="badge ok">Vaccine current</span>`;

@@ -46,20 +46,44 @@ function requireGhlToken(client) {
   return decrypt(client.ghlApiTokenEncrypted);
 }
 
+// Every business's Dog object has different field keys (see lib/ghl-contacts.js) —
+// this is required specifically where an unmapped call would silently write to a
+// bogus field key or make dog lookup meaninglessly always-empty.
+function requireDogMapping(client) {
+  if (!client.dogObjectKey || !client.dogNameFieldKey) {
+    const err = new Error('Configure your Dog object mapping in Settings first');
+    err.statusCode = 400;
+    throw err;
+  }
+  return buildDogFieldMap(client);
+}
+
+function buildDogFieldMap(client) {
+  return {
+    objectKey: client.dogObjectKey,
+    nameKey: client.dogNameFieldKey,
+    breedKey: client.dogBreedFieldKey,
+    notesKey: client.dogNotesFieldKey,
+    vaccineKeys: JSON.parse(client.dogVaccineFieldKeys || '[]'),
+  };
+}
+
 // Shared dog/owner/vaccine/unit enrichment — used by both the staff queue and
 // the calendar view, which need the same live-resolved GHL + unit info per booking.
-async function enrichBooking(booking, token) {
+// Degrades gracefully (dog: null) if the mapping isn't configured yet, rather than
+// failing the whole dashboard — staff should still see requests either way.
+async function enrichBooking(booking, dogFieldMap, token) {
   const [dogRecord, contact, unit] = await Promise.all([
-    getDogRecord(booking.ghlDogObjectId, token),
+    dogFieldMap.objectKey ? getDogRecord(booking.ghlDogObjectId, dogFieldMap.objectKey, token) : null,
     getContact(booking.ghlOwnerContactId, token),
     booking.unitId ? db.unit.findUnique({ where: { id: booking.unitId } }) : null,
   ]);
   return {
     ...booking,
     addOnsSelected: JSON.parse(booking.addOnsSelected),
-    dog: dogRecord ? dogSummaryFromRecord(dogRecord) : null,
+    dog: dogRecord ? dogSummaryFromRecord(dogRecord, dogFieldMap) : null,
     owner: contact ? { name: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim(), phone: contact.phone, email: contact.email } : null,
-    vaccine: dogRecord ? vaccineStatusFromRecord(dogRecord) : { current: false, missing: true, expirationDate: null },
+    vaccine: dogRecord ? vaccineStatusFromRecord(dogRecord, dogFieldMap.vaccineKeys) : { tracked: false, current: false, missing: false, expirationDate: null },
     unit: unit ? { id: unit.id, name: unit.name } : null,
   };
 }
@@ -70,9 +94,11 @@ const SERVICE_LABELS = { BOARDING: 'Boarding', DAY_CARE: 'Day Care', DAY_TRAININ
 const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 
 // Best-effort — a failed notification never fails or delays the booking itself.
-async function notifyBookingRequest({ client, booking, locationId, token }) {
-  const dogRecord = await getDogRecord(booking.ghlDogObjectId, token).catch(() => null);
-  const dogName = dogRecord ? dogSummaryFromRecord(dogRecord).name : 'a dog';
+async function notifyBookingRequest({ client, booking, dogFieldMap, locationId, token }) {
+  const dogRecord = dogFieldMap.objectKey
+    ? await getDogRecord(booking.ghlDogObjectId, dogFieldMap.objectKey, token).catch(() => null)
+    : null;
+  const dogName = dogRecord ? dogSummaryFromRecord(dogRecord, dogFieldMap).name : 'a dog';
   const dateRange = `${booking.startDate.toISOString().slice(0, 10)} to ${booking.endDate.toISOString().slice(0, 10)}`;
   const message = `New booking request: ${SERVICE_LABELS[booking.serviceType] || booking.serviceType} for ${dogName}, ${dateRange}. Review: ${APP_BASE_URL}/requests.html?location_id=${locationId}`;
 
@@ -154,10 +180,11 @@ router.post('/contacts', asyncHandler(async (req, res) => {
   const client = await getClient(locationId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const token = requireGhlToken(client);
+  const dogFieldMap = requireDogMapping(client);
 
   const contact = await upsertContact({ locationId, email, phone, firstName, lastName, token });
-  const dogRecords = await findDogsForContact({ locationId, contactId: contact.id, token });
-  const dogs = dogRecords.map(dogSummaryFromRecord);
+  const dogRecords = await findDogsForContact({ locationId, contactId: contact.id, dogFieldMap, token });
+  const dogs = dogRecords.map((r) => dogSummaryFromRecord(r, dogFieldMap));
 
   res.json({ contact, dogs });
 }));
@@ -174,8 +201,9 @@ router.post('/dogs', asyncHandler(async (req, res) => {
   const client = await getClient(locationId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const token = requireGhlToken(client);
+  const dogFieldMap = requireDogMapping(client);
 
-  const dog = await createDogRecord({ locationId, ownerContactId, name, breed, notes, token });
+  const dog = await createDogRecord({ locationId, ownerContactId, name, breed, notes, dogFieldMap, token });
   res.status(201).json({ dog });
 }));
 
@@ -282,9 +310,11 @@ router.post('/', asyncHandler(async (req, res) => {
     return { addOnId: addOn.id, name: addOn.name, price: addOn.price, qty: parseInt(requested.qty) || 1 };
   });
 
+  const dogFieldMap = buildDogFieldMap(client);
+
   let vaccineCheck;
   try {
-    const status = await getVaccineStatus(ghlDogObjectId, token);
+    const status = await getVaccineStatus(ghlDogObjectId, dogFieldMap, token);
     vaccineCheck = { checked: true, timestamp: new Date().toISOString(), details: status };
   } catch {
     vaccineCheck = { checked: false, timestamp: new Date().toISOString(), details: null };
@@ -310,7 +340,7 @@ router.post('/', asyncHandler(async (req, res) => {
 
   // Fire-and-forget — staff should get the booking response fast regardless of SMS delivery.
   if (client.staffNotifyPhone) {
-    notifyBookingRequest({ client, booking, locationId, token }).catch((err) => {
+    notifyBookingRequest({ client, booking, dogFieldMap, locationId, token }).catch((err) => {
       console.warn(`Staff notification failed: ${err.message}`);
     });
   }
@@ -325,6 +355,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const client = await getClient(locationId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const token = requireGhlToken(client);
+  const dogFieldMap = buildDogFieldMap(client);
 
   const status = req.query.status || 'REQUESTED';
   const bookings = await db.booking.findMany({
@@ -332,7 +363,7 @@ router.get('/', asyncHandler(async (req, res) => {
     orderBy: { startDate: 'asc' },
   });
 
-  const enriched = await Promise.all(bookings.map((b) => enrichBooking(b, token)));
+  const enriched = await Promise.all(bookings.map((b) => enrichBooking(b, dogFieldMap, token)));
 
   res.json({ bookings: enriched });
 }));
@@ -350,6 +381,7 @@ router.get('/calendar', asyncHandler(async (req, res) => {
   const client = await getClient(locationId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const token = requireGhlToken(client);
+  const dogFieldMap = buildDogFieldMap(client);
 
   const bookings = await db.booking.findMany({
     where: {
@@ -362,7 +394,7 @@ router.get('/calendar', asyncHandler(async (req, res) => {
     orderBy: { startDate: 'asc' },
   });
 
-  const enriched = await Promise.all(bookings.map((b) => enrichBooking(b, token)));
+  const enriched = await Promise.all(bookings.map((b) => enrichBooking(b, dogFieldMap, token)));
 
   res.json({
     bookings: enriched,
@@ -455,6 +487,7 @@ router.put('/:id/check-in', asyncHandler(async (req, res) => {
   const client = await getClient(locationId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const token = requireGhlToken(client);
+  const dogFieldMap = buildDogFieldMap(client);
 
   const booking = await db.booking.findUnique({ where: { id: req.params.id } });
   if (!booking || booking.clientId !== client.id) return res.status(404).json({ error: 'Booking not found' });
@@ -464,7 +497,7 @@ router.put('/:id/check-in', asyncHandler(async (req, res) => {
 
   let vaccineCheck;
   try {
-    const status = await getVaccineStatus(booking.ghlDogObjectId, token);
+    const status = await getVaccineStatus(booking.ghlDogObjectId, dogFieldMap, token);
     vaccineCheck = { checked: true, timestamp: new Date().toISOString(), details: status };
   } catch {
     vaccineCheck = { checked: false, timestamp: new Date().toISOString(), details: null };

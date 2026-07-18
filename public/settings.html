@@ -195,6 +195,50 @@
   <div id="ghl-connection-indicator" style="margin-top:10px; font-size:13px;"></div>
 </div>
 
+<!-- DOG OBJECT MAPPING -->
+<div class="card">
+  <h2>Dog Object Mapping</h2>
+  <p style="color:#666; font-size:12px; margin-bottom:12px;">
+    Tell us which of your GHL custom object holds dog records, and which fields on it are the name, breed,
+    notes, and vaccine expiration dates. Every business's object is set up differently, so this is pulled
+    live from your own GHL account rather than guessed.
+  </p>
+  <button class="save-btn" onclick="loadDogObjectTypes()">Load My GHL Objects</button>
+  <span class="save-status" id="status-dog-objects-load"></span>
+
+  <div id="dog-object-type-row" class="field-row full" style="margin-top:12px; display:none;">
+    <div>
+      <label class="field-label">Dog Object</label>
+      <select id="dog-object-type" onchange="loadDogObjectFields()"></select>
+    </div>
+  </div>
+
+  <div id="dog-object-fields" style="display:none;">
+    <div class="field-row">
+      <div>
+        <label class="field-label">Name Field (required)</label>
+        <select id="dog-field-name"></select>
+      </div>
+      <div>
+        <label class="field-label">Breed Field</label>
+        <select id="dog-field-breed"></select>
+      </div>
+    </div>
+    <div class="field-row full">
+      <div>
+        <label class="field-label">Notes Field</label>
+        <select id="dog-field-notes"></select>
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <label class="field-label" style="margin-bottom:8px">Vaccine Expiration Fields (any number)</label>
+      <div id="dog-field-vaccines" class="days-grid"></div>
+    </div>
+    <button class="save-btn" onclick="saveDogObjectMapping()">Save Mapping</button>
+    <span class="save-status" id="status-dog-mapping"></span>
+  </div>
+</div>
+
 <!-- STAFF NOTIFICATIONS -->
 <div class="card">
   <h2>Staff Notifications</h2>
@@ -534,6 +578,115 @@
     renderGhlConnectionStatus(true);
   }
 
+  // Holds the currently-saved mapping so newly-loaded object/field dropdowns
+  // can restore the right selections instead of always starting blank.
+  let currentDogMapping = null;
+
+  async function loadDogObjectTypes() {
+    const status = document.getElementById('status-dog-objects-load');
+    status.textContent = 'Loading…';
+    const res = await fetch(API('/api/settings/dog-object-types'));
+    if (!res.ok) {
+      const { error } = await res.json();
+      status.textContent = `✗ ${error}`;
+      return;
+    }
+    const { types } = await res.json();
+    const select = document.getElementById('dog-object-type');
+    select.innerHTML = '<option value="">Select…</option>' +
+      types.map(t => `<option value="${t.key}">${t.label}</option>`).join('');
+    document.getElementById('dog-object-type-row').style.display = '';
+    status.textContent = '';
+
+    if (currentDogMapping?.dogObjectKey && types.some(t => t.key === currentDogMapping.dogObjectKey)) {
+      select.value = currentDogMapping.dogObjectKey;
+      await loadDogObjectFields();
+    }
+  }
+
+  async function loadDogObjectFields() {
+    const objectKey = document.getElementById('dog-object-type').value;
+    const status = document.getElementById('status-dog-objects-load');
+    if (!objectKey) {
+      document.getElementById('dog-object-fields').style.display = 'none';
+      return;
+    }
+
+    status.textContent = 'Loading fields…';
+    const res = await fetch(API(`/api/settings/dog-object-fields?objectKey=${encodeURIComponent(objectKey)}`));
+    if (!res.ok) {
+      const { error } = await res.json();
+      status.textContent = `✗ ${error}`;
+      return;
+    }
+    const { fields } = await res.json();
+    status.textContent = '';
+    renderDogFields(fields, objectKey === currentDogMapping?.dogObjectKey ? currentDogMapping : null);
+    document.getElementById('dog-object-fields').style.display = '';
+  }
+
+  function renderDogFields(fields, mapping) {
+    const options = '<option value="">None</option>' +
+      fields.map(f => `<option value="${f.fieldKey}">${f.name}</option>`).join('');
+    const nameSelect = document.getElementById('dog-field-name');
+    const breedSelect = document.getElementById('dog-field-breed');
+    const notesSelect = document.getElementById('dog-field-notes');
+    nameSelect.innerHTML = options;
+    breedSelect.innerHTML = options;
+    notesSelect.innerHTML = options;
+
+    const savedVaccineKeys = mapping ? JSON.parse(mapping.dogVaccineFieldKeys || '[]') : [];
+    const vaccineContainer = document.getElementById('dog-field-vaccines');
+    vaccineContainer.innerHTML = '';
+    fields.forEach(f => {
+      const chip = document.createElement('div');
+      chip.className = 'day-chip';
+      chip.textContent = f.name;
+      chip.dataset.fieldKey = f.fieldKey;
+      if (savedVaccineKeys.includes(f.fieldKey)) chip.classList.add('active');
+      chip.onclick = () => chip.classList.toggle('active');
+      vaccineContainer.appendChild(chip);
+    });
+
+    if (mapping) {
+      nameSelect.value = mapping.dogNameFieldKey || '';
+      breedSelect.value = mapping.dogBreedFieldKey || '';
+      notesSelect.value = mapping.dogNotesFieldKey || '';
+    }
+  }
+
+  async function saveDogObjectMapping() {
+    const status = document.getElementById('status-dog-mapping');
+    const dogObjectKey = document.getElementById('dog-object-type').value;
+    const dogNameFieldKey = document.getElementById('dog-field-name').value;
+    const dogBreedFieldKey = document.getElementById('dog-field-breed').value;
+    const dogNotesFieldKey = document.getElementById('dog-field-notes').value;
+    const dogVaccineFieldKeys = Array.from(document.querySelectorAll('#dog-field-vaccines .day-chip.active'))
+      .map(c => c.dataset.fieldKey);
+
+    if (!dogObjectKey || !dogNameFieldKey) {
+      status.textContent = '✗ Object and Name field are required';
+      return;
+    }
+
+    status.textContent = 'Saving…';
+    const res = await fetch(API('/api/settings/dog-object-mapping'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dogObjectKey, dogNameFieldKey, dogBreedFieldKey, dogNotesFieldKey, dogVaccineFieldKeys }),
+    });
+
+    if (!res.ok) {
+      const { error } = await res.json();
+      status.textContent = `✗ ${error}`;
+      return;
+    }
+    const { client } = await res.json();
+    currentDogMapping = client;
+    status.textContent = '✓ Saved';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
+
   async function saveNotifications() {
     const status = document.getElementById('status-notifications');
     const staffNotifyName = document.getElementById('staff-notify-name').value.trim();
@@ -558,6 +711,11 @@
     document.getElementById('staff-notify-name').value = client.staffNotifyName || '';
     document.getElementById('staff-notify-phone').value = client.staffNotifyPhone || '';
     document.getElementById('max-addons-per-day').value = client.maxAddOnsPerDay;
+
+    currentDogMapping = client;
+    if (client.ghlConnected && client.dogObjectKey) {
+      loadDogObjectTypes();
+    }
 
     renderCapacities(client.capacityPools);
     populateCapacityDropdowns(client.capacityPools);

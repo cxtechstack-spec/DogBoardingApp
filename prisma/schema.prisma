@@ -26,6 +26,16 @@ model Client {
   // and the phone number itself. Null means no notification is sent.
   staffNotifyName      String?
   staffNotifyPhone     String?
+  // Which of this business's own GHL custom objects/fields represent a dog —
+  // every business's Dog object has different field keys, so this maps our
+  // concepts (name, breed, notes, vaccine dates) to their actual field keys.
+  dogObjectKey         String?
+  dogNameFieldKey      String?
+  dogBreedFieldKey     String?
+  dogNotesFieldKey     String?
+  // JSON array of field keys — zero or more vaccine-expiration date fields.
+  // "Current" means every listed field has a value and it isn't in the past.
+  dogVaccineFieldKeys  String            @default("[]")
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 }
