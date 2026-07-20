@@ -46,7 +46,11 @@ router.put('/ghl-connection', asyncHandler(async (req, res) => {
   const { apiToken } = req.body;
   if (!apiToken) return res.status(400).json({ error: 'apiToken required' });
 
-  const check = await ghlRequest('GET', `/locations/${locationId}`, { token: apiToken });
+  // Note: GET /locations/:id is Agency-only and always 403s for a sub-account
+  // Private Integration Token, even with correct scopes — /contacts/ is a
+  // sub-account-scoped endpoint every PIT can actually reach, so it validates
+  // both the token and that it's scoped to this location.
+  const check = await ghlRequest('GET', '/contacts/', { params: { locationId, limit: 1 }, token: apiToken });
   if (!check.ok) {
     const detail = check.data?.message || check.data?.error || `HTTP ${check.status}`;
     return res.status(400).json({ error: `That token could not access this GHL location: ${detail}` });
