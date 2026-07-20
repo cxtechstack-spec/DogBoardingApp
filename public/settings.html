@@ -589,10 +589,11 @@
   async function loadDogObjectTypes() {
     const status = document.getElementById('status-dog-objects-load');
     status.textContent = 'Loading…';
-    const res = await fetch(API('/api/settings/dog-object-types'));
+    const url = API('/api/settings/dog-object-types');
+    const res = await fetch(url);
     if (!res.ok) {
       const { error } = await res.json();
-      status.textContent = `✗ ${error}`;
+      status.textContent = `✗ ${error} (requested: ${url})`;
       return;
     }
     const { types } = await res.json();
