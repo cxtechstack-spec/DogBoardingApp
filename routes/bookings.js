@@ -184,7 +184,13 @@ router.post('/contacts', asyncHandler(async (req, res) => {
 
   const contact = await upsertContact({ locationId, email, phone, firstName, lastName, token });
   const dogRecords = await findDogsForContact({ locationId, contactId: contact.id, dogFieldMap, token });
-  const dogs = dogRecords.map((r) => dogSummaryFromRecord(r, dogFieldMap));
+  // Vaccine status is included so the booking form can gate a dog whose
+  // records are missing/expired behind the client's vaccine-update form
+  // (see Client.vaccineUpdateFormUrl) before letting the booking proceed.
+  const dogs = dogRecords.map((r) => ({
+    ...dogSummaryFromRecord(r, dogFieldMap),
+    vaccine: vaccineStatusFromRecord(r, dogFieldMap.vaccineKeys),
+  }));
 
   res.json({ contact, dogs });
 }));

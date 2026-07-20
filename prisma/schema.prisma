@@ -17,6 +17,14 @@ model Client {
   // API endpoint is Agency-only and 403s for a sub-account PIT), so the
   // business types it in directly.
   businessName         String?
+  // External GHL Form links the client-facing booking form (request.html)
+  // sends dog owners to instead of collecting this itself — this business's
+  // own GHL Workflow creates/updates the Dog object (and vaccine records,
+  // including uploaded proof) from those form submissions. Null means this
+  // gate is off and the booking form falls back to its own simple
+  // name/breed/notes fields for a new dog, with no vaccine gate at all.
+  newDogFormUrl        String?
+  vaccineUpdateFormUrl String?
   services             ServiceSettings[]
   addOns               AddOn[]
   capacityPools        CapacityPool[]

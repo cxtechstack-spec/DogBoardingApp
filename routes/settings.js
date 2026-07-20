@@ -405,6 +405,28 @@ router.put('/business-name', asyncHandler(async (req, res) => {
   res.json({ client: { ...updated, ghlConnected: !!ghlApiTokenEncrypted } });
 }));
 
+// PUT /api/settings/intake-forms
+// External GHL Form links request.html sends dog owners to instead of
+// collecting a new dog / updated vaccine records itself. Either can be left
+// blank to turn that gate off (see schema.prisma's Client model for why).
+router.put('/intake-forms', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const { newDogFormUrl, vaccineUpdateFormUrl } = req.body;
+  const client = await getOrCreateClient(locationId);
+
+  const { ghlApiTokenEncrypted, ...updated } = await db.client.update({
+    where: { id: client.id },
+    data: {
+      newDogFormUrl: newDogFormUrl || null,
+      vaccineUpdateFormUrl: vaccineUpdateFormUrl || null,
+    },
+  });
+
+  res.json({ client: { ...updated, ghlConnected: !!ghlApiTokenEncrypted } });
+}));
+
 // PUT /api/settings/notifications
 // Who gets texted when a new booking request comes in. Both fields optional —
 // clearing the phone turns notifications off for this client.

@@ -193,6 +193,31 @@
   <span class="save-status" id="status-business-name"></span>
 </div>
 
+<!-- DOG INTAKE / VACCINE FORMS -->
+<div class="card">
+  <h2>Dog Intake / Vaccine Forms</h2>
+  <p style="color:#666; font-size:12px; margin-bottom:12px;">
+    Paste the links to your own GHL Forms here. When set, the booking form sends dog owners to these instead of
+    collecting the info itself — for a brand-new dog, or an existing dog whose vaccine records are missing or
+    expired — and won't let them continue until your Workflow has created/updated the dog's GHL record. Leave
+    either blank to turn that gate off (booking proceeds without requiring it).
+  </p>
+  <div class="field-row full">
+    <div>
+      <label class="field-label">New Dog Intake Form URL</label>
+      <input type="text" id="new-dog-form-url" placeholder="https://...">
+    </div>
+  </div>
+  <div class="field-row full">
+    <div>
+      <label class="field-label">Vaccine Update Form URL</label>
+      <input type="text" id="vaccine-update-form-url" placeholder="https://...">
+    </div>
+  </div>
+  <button class="save-btn" onclick="saveIntakeForms()">Save</button>
+  <span class="save-status" id="status-intake-forms"></span>
+</div>
+
 <!-- GHL CONNECTION -->
 <div class="card">
   <h2>GHL Connection</h2>
@@ -725,6 +750,22 @@
     setTimeout(() => { status.textContent = ''; }, 3000);
   }
 
+  async function saveIntakeForms() {
+    const status = document.getElementById('status-intake-forms');
+    const newDogFormUrl = document.getElementById('new-dog-form-url').value.trim();
+    const vaccineUpdateFormUrl = document.getElementById('vaccine-update-form-url').value.trim();
+
+    status.textContent = 'Saving…';
+    const res = await fetch(API('/api/settings/intake-forms'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newDogFormUrl, vaccineUpdateFormUrl }),
+    });
+
+    status.textContent = res.ok ? '✓ Saved' : '✗ Error';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
+
   async function saveNotifications() {
     const status = document.getElementById('status-notifications');
     const staffNotifyName = document.getElementById('staff-notify-name').value.trim();
@@ -747,6 +788,8 @@
 
     renderGhlConnectionStatus(client.ghlConnected);
     document.getElementById('business-name').value = client.businessName || '';
+    document.getElementById('new-dog-form-url').value = client.newDogFormUrl || '';
+    document.getElementById('vaccine-update-form-url').value = client.vaccineUpdateFormUrl || '';
     document.getElementById('staff-notify-name').value = client.staffNotifyName || '';
     document.getElementById('staff-notify-phone').value = client.staffNotifyPhone || '';
     document.getElementById('max-addons-per-day').value = client.maxAddOnsPerDay;

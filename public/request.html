@@ -193,6 +193,14 @@
       </div>
     </div>
   </div>
+  <div id="dog-form-gate" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid #f0f0f0;">
+    <p id="dog-form-gate-message" style="margin-bottom:12px;"></p>
+    <div class="btn-row">
+      <a id="dog-form-gate-link" href="#" target="_blank" rel="noopener" class="btn-link">Open Form</a>
+      <button class="btn" onclick="recheckDogForm()">I've submitted it — Continue</button>
+    </div>
+    <p class="error-text" id="dog-form-gate-status" style="display:none; margin-top:8px;"></p>
+  </div>
   <p class="error-text" id="dog-error" style="display:none"></p>
   <div class="btn-row">
     <button class="btn-link" onclick="showStep('owner')">Back</button>
@@ -377,6 +385,7 @@
 
     container.innerHTML = dogCards + addNewCard;
     newDogFields.style.display = 'none';
+    document.getElementById('dog-form-gate').style.display = 'none';
 
     if (!state.dogs.length) {
       selectDog('__new__');
@@ -388,7 +397,63 @@
     document.querySelectorAll('#dog-options .option-card').forEach((el) => {
       el.classList.toggle('selected', el.dataset.dogId === dogId);
     });
-    document.getElementById('new-dog-fields').style.display = dogId === '__new__' ? 'block' : 'none';
+    // The intake form fully replaces these inline fields once a form URL is
+    // configured — see showDogFormGate().
+    const useInlineNewDogFields = dogId === '__new__' && !state.client.newDogFormUrl;
+    document.getElementById('new-dog-fields').style.display = useInlineNewDogFields ? 'block' : 'none';
+    document.getElementById('dog-form-gate').style.display = 'none';
+  }
+
+  // Points a dog owner at this business's own GHL Form (which their Workflow
+  // uses to create/update the Dog object, including vaccine records and any
+  // uploaded proof) instead of collecting that here, and blocks continuing
+  // until a recheck confirms it actually went through — see recheckDogForm().
+  function showDogFormGate(type, dog) {
+    const gate = document.getElementById('dog-form-gate');
+    const message = document.getElementById('dog-form-gate-message');
+    const link = document.getElementById('dog-form-gate-link');
+    document.getElementById('dog-form-gate-status').style.display = 'none';
+
+    if (type === 'new') {
+      message.textContent = "Since this is a new dog, please fill out our dog intake & vaccine records form before continuing.";
+      link.href = state.client.newDogFormUrl;
+    } else {
+      message.textContent = `${dog?.name ?? 'This dog'}'s vaccine records are missing or expired — please fill out our vaccine update form before continuing.`;
+      link.href = state.client.vaccineUpdateFormUrl;
+    }
+    gate.dataset.gateType = type;
+    document.getElementById('new-dog-fields').style.display = 'none';
+    gate.style.display = 'block';
+  }
+
+  // Re-runs the same owner lookup to pull a fresh dogs list from GHL, since
+  // the form's Workflow runs asynchronously and may take a moment to create
+  // or update the record — then hands back to the normal picker so the owner
+  // re-selects (their new dog now appears, or the same dog now passes the
+  // vaccine check and can proceed through confirmDog() as usual).
+  async function recheckDogForm() {
+    const statusEl = document.getElementById('dog-form-gate-status');
+    statusEl.style.display = 'none';
+
+    const res = await fetch(API('/api/bookings/contacts'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        firstName: document.getElementById('owner-firstName').value.trim(),
+        lastName: document.getElementById('owner-lastName').value.trim(),
+        phone: document.getElementById('owner-phone').value.trim(),
+        email: document.getElementById('owner-email').value.trim(),
+      }),
+    });
+    if (!res.ok) {
+      statusEl.textContent = "Couldn't check just now — please try again in a moment.";
+      statusEl.style.display = 'block';
+      return;
+    }
+
+    const { dogs } = await res.json();
+    state.dogs = dogs;
+    renderDogOptions();
   }
 
   async function confirmDog() {
@@ -402,6 +467,11 @@
     }
 
     if (state.selectedDogId === '__new__') {
+      if (state.client.newDogFormUrl) {
+        showDogFormGate('new');
+        return;
+      }
+
       const name = document.getElementById('dog-name').value.trim();
       const breed = document.getElementById('dog-breed').value.trim();
       const notes = document.getElementById('dog-notes').value.trim();
@@ -423,6 +493,14 @@
       const { dog } = await res.json();
       state.ghlDogObjectId = dog.id;
     } else {
+      const dog = state.dogs.find((d) => d.id === state.selectedDogId);
+      const needsVaccineUpdate = state.client.vaccineUpdateFormUrl
+        && dog?.vaccine?.tracked
+        && (dog.vaccine.missing || !dog.vaccine.current);
+      if (needsVaccineUpdate) {
+        showDogFormGate('vaccine', dog);
+        return;
+      }
       state.ghlDogObjectId = state.selectedDogId;
     }
 
