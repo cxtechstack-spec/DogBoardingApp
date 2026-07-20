@@ -210,20 +210,41 @@ router.delete('/services/:serviceType', asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// A pool can name another pool (same client, not itself) as its overflow —
+// e.g. Crates <-> Kennels used interchangeably once the primary is full.
+// See lib/availability.js / routes/bookings.js confirm for how this is used.
+async function resolveFallbackPoolId(clientId, fallbackPoolId, excludeId) {
+  if (!fallbackPoolId) return null;
+  if (fallbackPoolId === excludeId) {
+    const err = new Error('A capacity cannot be its own fallback');
+    err.statusCode = 400;
+    throw err;
+  }
+  const fallback = await db.capacityPool.findUnique({ where: { id: fallbackPoolId } });
+  if (!fallback || fallback.clientId !== clientId) {
+    const err = new Error('fallbackPoolId does not belong to this client');
+    err.statusCode = 400;
+    throw err;
+  }
+  return fallbackPoolId;
+}
+
 // POST /api/settings/pools
 // Creates a new capacity pool for this client (e.g. "Kennels: 20 total").
 router.post('/pools', asyncHandler(async (req, res) => {
   const locationId = req.query.location_id;
   if (!locationId) return res.status(400).json({ error: 'location_id required' });
 
-  const { name, totalCapacity } = req.body;
+  const { name, totalCapacity, fallbackPoolId } = req.body;
   const client = await getOrCreateClient(locationId);
+  const resolvedFallbackId = await resolveFallbackPoolId(client.id, fallbackPoolId, null);
 
   const pool = await db.capacityPool.create({
     data: {
       clientId: client.id,
       name,
       totalCapacity: parseInt(totalCapacity),
+      fallbackPoolId: resolvedFallbackId,
     },
   });
 
@@ -236,12 +257,13 @@ router.put('/pools/:id', asyncHandler(async (req, res) => {
   const locationId = req.query.location_id;
   if (!locationId) return res.status(400).json({ error: 'location_id required' });
 
-  const { name, totalCapacity } = req.body;
+  const { name, totalCapacity, fallbackPoolId } = req.body;
   const client = await getOrCreateClient(locationId);
+  const resolvedFallbackId = await resolveFallbackPoolId(client.id, fallbackPoolId, req.params.id);
 
   const result = await db.capacityPool.updateMany({
     where: { id: req.params.id, clientId: client.id },
-    data: { name, totalCapacity: parseInt(totalCapacity) },
+    data: { name, totalCapacity: parseInt(totalCapacity), fallbackPoolId: resolvedFallbackId },
   });
   if (result.count === 0) return res.status(404).json({ error: 'Capacity not found' });
 

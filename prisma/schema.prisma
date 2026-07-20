@@ -43,15 +43,22 @@ model Client {
 // A named group of physical spaces (e.g. "Kennels", "Crates") that one or more
 // services draw from. Services sharing a pool compete for the same spots on a given day.
 model CapacityPool {
-  id            String            @id @default(cuid())
-  clientId      String
-  client        Client            @relation(fields: [clientId], references: [id])
-  name          String
-  totalCapacity Int
-  services      ServiceSettings[]
-  units         Unit[]
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
+  id             String            @id @default(cuid())
+  clientId       String
+  client         Client            @relation(fields: [clientId], references: [id])
+  name           String
+  totalCapacity  Int
+  // Optional overflow pool — when this pool is full, availability and unit
+  // assignment also draw from the fallback pool (e.g. Crates <-> Kennels used
+  // interchangeably). Set both pools' fallbackPoolId to each other for
+  // two-way overflow; one-way is allowed if only one direction should overflow.
+  fallbackPoolId String?
+  fallbackPool   CapacityPool?     @relation("PoolFallback", fields: [fallbackPoolId], references: [id])
+  fallbackFor    CapacityPool[]    @relation("PoolFallback")
+  services       ServiceSettings[]
+  units          Unit[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 }
 
 // A specific physical space within a pool (e.g. "Kennel 1"). Unlike the pool's

@@ -428,7 +428,10 @@ router.put('/:id/confirm', asyncHandler(async (req, res) => {
 
   const service = client.services.find((s) => s.serviceType === booking.serviceType);
   const unit = await db.unit.findUnique({ where: { id: unitId } });
-  if (!unit || !service || unit.capacityPoolId !== service.capacityPoolId) {
+  const allowedPoolIds = service
+    ? [service.capacityPoolId, service.capacityPool.fallbackPoolId].filter(Boolean)
+    : [];
+  if (!unit || !service || !allowedPoolIds.includes(unit.capacityPoolId)) {
     return res.status(400).json({ error: "That unit isn't part of this booking's capacity pool" });
   }
 

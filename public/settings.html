@@ -265,7 +265,9 @@
   <h2>Total Capacity</h2>
   <p style="color:#666; font-size:12px; margin-bottom:12px;">
     Groups of physical spaces (e.g. kennels, crates). Link each service below to the capacity it draws from —
-    services sharing the same capacity compete for the same spots on a given day.
+    services sharing the same capacity compete for the same spots on a given day. Optionally set a fallback
+    capacity below — once a capacity is full, bookings can also use the fallback's spaces. Set both capacities'
+    fallback to each other for two-way interchangeable use (e.g. Crates and Kennels).
   </p>
   <div class="addon-list" id="capacity-list">
     <p class="empty-state">No capacity entries configured.</p>
@@ -783,7 +785,12 @@
     setTimeout(() => { status.textContent = ''; }, 3000);
   }
 
+  // Kept so updateCapacityFallback() can look up a pool's current name/totalCapacity
+  // without a round-trip — the fallback dropdown only ever changes fallbackPoolId.
+  let currentCapacities = [];
+
   function renderCapacities(capacities) {
+    currentCapacities = capacities;
     const list = document.getElementById('capacity-list');
     if (!capacities.length) {
       list.innerHTML = '<p class="empty-state">No capacity entries configured.</p>';
@@ -793,9 +800,29 @@
       <div class="addon-row">
         <span>${c.name}</span>
         <span class="addon-meta">${c.totalCapacity} total</span>
+        <select onchange="updateCapacityFallback('${c.id}', this.value)" style="font-size:12px; max-width:220px;">
+          <option value="">No fallback</option>
+          ${capacities.filter(o => o.id !== c.id).map(o => `<option value="${o.id}" ${c.fallbackPoolId === o.id ? 'selected' : ''}>Fallback: ${o.name}</option>`).join('')}
+        </select>
         <button class="icon-btn danger" onclick="deleteCapacity('${c.id}')">Remove</button>
       </div>
     `).join('');
+  }
+
+  async function updateCapacityFallback(id, fallbackPoolId) {
+    const capacity = currentCapacities.find(c => c.id === id);
+    if (!capacity) return;
+
+    await fetch(API(`/api/settings/pools/${id}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: capacity.name, totalCapacity: capacity.totalCapacity, fallbackPoolId: fallbackPoolId || null }),
+    });
+
+    const res = await fetch(API('/api/settings'));
+    const { client } = await res.json();
+    renderCapacities(client.capacityPools);
+    populateCapacityDropdowns(client.capacityPools);
   }
 
   function populateCapacityDropdowns(capacities) {
