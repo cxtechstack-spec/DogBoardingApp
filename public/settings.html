@@ -193,6 +193,7 @@
   <button class="save-btn" onclick="saveGhlConnection()">Save &amp; Connect</button>
   <span class="save-status" id="status-ghl-connection"></span>
   <div id="ghl-connection-indicator" style="margin-top:10px; font-size:13px;"></div>
+  <div style="margin-top:10px; font-size:12px; color:#888;">Location ID detected from this page's URL: <code id="debug-location-id"></code></div>
 </div>
 
 <!-- DOG OBJECT MAPPING -->
@@ -509,6 +510,7 @@
   const params = new URLSearchParams(window.location.search);
   const locationId = params.get('location_id') || params.get('locationId') || 'dev-test';
   const API = (path) => `${path}?location_id=${encodeURIComponent(locationId)}`;
+  document.getElementById('debug-location-id').textContent = locationId;
 
   // Track selected days per service
   const selectedDays = { BOARDING: new Set(), DAY_CARE: new Set(), DAY_TRAINING: new Set() };
