@@ -151,7 +151,7 @@
 
 <script>
   const params = new URLSearchParams(window.location.search);
-  const locationId = params.get('location_id') || 'dev-test';
+  const locationId = params.get('location_id') || params.get('locationId') || 'dev-test';
   const API = (path) => `${path}${path.includes('?') ? '&' : '?'}location_id=${encodeURIComponent(locationId)}`;
 
   document.getElementById('calendar-link').href = `calendar.html?location_id=${encodeURIComponent(locationId)}`;

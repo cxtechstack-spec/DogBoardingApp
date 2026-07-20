@@ -273,7 +273,7 @@
   const SERVICE_LABELS = { BOARDING: 'Boarding', DAY_CARE: 'Day Care', DAY_TRAINING: 'Day Training' };
 
   const params = new URLSearchParams(window.location.search);
-  const locationId = params.get('location_id');
+  const locationId = params.get('location_id') || params.get('locationId');
   const API = (path) => `${path}${path.includes('?') ? '&' : '?'}location_id=${encodeURIComponent(locationId)}`;
 
   const state = {

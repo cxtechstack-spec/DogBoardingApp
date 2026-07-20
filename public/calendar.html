@@ -153,7 +153,7 @@
   const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   const params = new URLSearchParams(window.location.search);
-  const locationId = params.get('location_id') || 'dev-test';
+  const locationId = params.get('location_id') || params.get('locationId') || 'dev-test';
   const API = (path) => `${path}${path.includes('?') ? '&' : '?'}location_id=${encodeURIComponent(locationId)}`;
 
   document.getElementById('bookings-link').href = `requests.html?location_id=${encodeURIComponent(locationId)}`;

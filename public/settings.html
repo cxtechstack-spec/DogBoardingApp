@@ -503,9 +503,11 @@
   const DAY_LABELS = { MON:'Mon', TUE:'Tue', WED:'Wed', THU:'Thu', FRI:'Fri', SAT:'Sat', SUN:'Sun' };
   const SERVICES = ['BOARDING', 'DAY_CARE', 'DAY_TRAINING'];
 
-  // Get location_id from URL (injected by GHL Custom Menu Link)
+  // Get location_id from URL (injected by GHL Custom Menu Link — GHL uses
+  // camelCase locationId, but we've also used location_id historically, so
+  // accept either).
   const params = new URLSearchParams(window.location.search);
-  const locationId = params.get('location_id') || 'dev-test';
+  const locationId = params.get('location_id') || params.get('locationId') || 'dev-test';
   const API = (path) => `${path}?location_id=${encodeURIComponent(locationId)}`;
 
   // Track selected days per service
