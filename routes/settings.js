@@ -48,7 +48,8 @@ router.put('/ghl-connection', asyncHandler(async (req, res) => {
 
   const check = await ghlRequest('GET', `/locations/${locationId}`, { token: apiToken });
   if (!check.ok) {
-    return res.status(400).json({ error: 'That token could not access this GHL location — check it and try again.' });
+    const detail = check.data?.message || check.data?.error || `HTTP ${check.status}`;
+    return res.status(400).json({ error: `That token could not access this GHL location: ${detail}` });
   }
 
   const client = await getOrCreateClient(locationId);
