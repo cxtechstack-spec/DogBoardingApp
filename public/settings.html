@@ -509,7 +509,7 @@
   // accept either).
   const params = new URLSearchParams(window.location.search);
   const locationId = params.get('location_id') || params.get('locationId') || 'dev-test';
-  const API = (path) => `${path}?location_id=${encodeURIComponent(locationId)}`;
+  const API = (path) => `${path}${path.includes('?') ? '&' : '?'}location_id=${encodeURIComponent(locationId)}`;
   document.getElementById('debug-location-id').textContent = locationId;
 
   // Track selected days per service
