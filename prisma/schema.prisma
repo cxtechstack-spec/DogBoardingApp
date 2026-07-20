@@ -12,6 +12,11 @@ datasource db {
 model Client {
   id                   String            @id @default(cuid())
   ghlLocationId        String            @unique
+  // Display name shown on the client-facing booking form (request.html) —
+  // there's no reliable way to read this from GHL itself (the Get Location
+  // API endpoint is Agency-only and 403s for a sub-account PIT), so the
+  // business types it in directly.
+  businessName         String?
   services             ServiceSettings[]
   addOns               AddOn[]
   capacityPools        CapacityPool[]

@@ -388,6 +388,23 @@ router.put('/max-addons-per-day', asyncHandler(async (req, res) => {
   res.json({ client: { ...updated, ghlConnected: !!ghlApiTokenEncrypted } });
 }));
 
+// PUT /api/settings/business-name
+// Display name shown on the client-facing booking form (request.html).
+router.put('/business-name', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const { businessName } = req.body;
+  const client = await getOrCreateClient(locationId);
+
+  const { ghlApiTokenEncrypted, ...updated } = await db.client.update({
+    where: { id: client.id },
+    data: { businessName: businessName || null },
+  });
+
+  res.json({ client: { ...updated, ghlConnected: !!ghlApiTokenEncrypted } });
+}));
+
 // PUT /api/settings/notifications
 // Who gets texted when a new booking request comes in. Both fields optional —
 // clearing the phone turns notifications off for this client.

@@ -177,6 +177,22 @@
 
 <h1>Boarding Settings</h1>
 
+<!-- BUSINESS NAME -->
+<div class="card">
+  <h2>Business Name</h2>
+  <p style="color:#666; font-size:12px; margin-bottom:12px;">
+    Shown at the top of your client-facing booking form (request.html) so it reads as your business, not a generic form.
+  </p>
+  <div class="field-row full">
+    <div>
+      <label class="field-label">Name</label>
+      <input type="text" id="business-name" placeholder="e.g. Long Dog Boarding &amp; Daycare">
+    </div>
+  </div>
+  <button class="save-btn" onclick="saveBusinessName()">Save</button>
+  <span class="save-status" id="status-business-name"></span>
+</div>
+
 <!-- GHL CONNECTION -->
 <div class="card">
   <h2>GHL Connection</h2>
@@ -694,6 +710,21 @@
     setTimeout(() => { status.textContent = ''; }, 3000);
   }
 
+  async function saveBusinessName() {
+    const status = document.getElementById('status-business-name');
+    const businessName = document.getElementById('business-name').value.trim();
+
+    status.textContent = 'Saving…';
+    const res = await fetch(API('/api/settings/business-name'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ businessName }),
+    });
+
+    status.textContent = res.ok ? '✓ Saved' : '✗ Error';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
+
   async function saveNotifications() {
     const status = document.getElementById('status-notifications');
     const staffNotifyName = document.getElementById('staff-notify-name').value.trim();
@@ -715,6 +746,7 @@
     const { client } = await res.json();
 
     renderGhlConnectionStatus(client.ghlConnected);
+    document.getElementById('business-name').value = client.businessName || '';
     document.getElementById('staff-notify-name').value = client.staffNotifyName || '';
     document.getElementById('staff-notify-phone').value = client.staffNotifyPhone || '';
     document.getElementById('max-addons-per-day').value = client.maxAddOnsPerDay;

@@ -138,7 +138,7 @@
 </head>
 <body>
 
-<h1>Request a Booking</h1>
+<h1 id="page-title">Request a Booking</h1>
 <p id="load-error" class="error-text" style="display:none"></p>
 
 <!-- STEP 1: Owner + Dog -->
@@ -320,6 +320,11 @@
       return;
     }
     state.client = client;
+
+    if (client.businessName) {
+      document.getElementById('page-title').textContent = `Book with ${client.businessName}`;
+      document.title = `Book with ${client.businessName}`;
+    }
   }
 
   async function lookupOwner() {
