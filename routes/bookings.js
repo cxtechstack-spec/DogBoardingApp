@@ -15,6 +15,7 @@ import {
   upsertContact,
   findDogsForContact,
   createDogRecord,
+  updateDogVaccineFields,
   getDogRecord,
   getContact,
   getVaccineStatus,
@@ -211,6 +212,46 @@ router.post('/dogs', asyncHandler(async (req, res) => {
 
   const dog = await createDogRecord({ locationId, ownerContactId, name, breed, notes, dogFieldMap, token });
   res.status(201).json({ dog });
+}));
+
+// PUT /api/bookings/dogs/:id/vaccines?location_id=
+// Updates only this one dog's configured vaccine-expiration fields, directly
+// by record ID — bypasses GHL's own "Update Associated Record for Contact"
+// workflow action, which has no way to target a single record among several
+// tied to the same contact (confirmed live: it silently overwrites every dog
+// under that contact instead of just the one being renewed).
+router.put('/dogs/:id/vaccines', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const { vaccineDates } = req.body;
+  if (!vaccineDates || typeof vaccineDates !== 'object') {
+    return res.status(400).json({ error: 'vaccineDates required' });
+  }
+
+  const client = await getClient(locationId);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const token = requireGhlToken(client);
+  const dogFieldMap = requireDogMapping(client);
+
+  // Only ever write to fields this business actually configured as vaccine
+  // fields — never let an arbitrary key through to a real GHL property write.
+  const allowedKeys = new Set(dogFieldMap.vaccineKeys);
+  for (const key of Object.keys(vaccineDates)) {
+    if (!allowedKeys.has(key)) {
+      return res.status(400).json({ error: `${key} is not a configured vaccine field` });
+    }
+  }
+
+  const dog = await updateDogVaccineFields({
+    dogObjectId: req.params.id,
+    objectKey: dogFieldMap.objectKey,
+    locationId,
+    vaccineDates,
+    token,
+  });
+
+  res.json({ dog });
 }));
 
 // POST /api/bookings/invoices?location_id=

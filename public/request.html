@@ -201,6 +201,18 @@
     </div>
     <p class="error-text" id="dog-form-gate-status" style="display:none; margin-top:8px;"></p>
   </div>
+  <div id="vaccine-update-gate" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid #f0f0f0;">
+    <p id="vaccine-update-message" style="margin-bottom:12px;"></p>
+    <div id="vaccine-update-fields"></div>
+    <p class="hint-text" id="vaccine-update-upload-hint" style="display:none; margin:8px 0;">
+      Please also <a id="vaccine-update-upload-link" href="#" target="_blank" rel="noopener">upload proof of vaccination</a> for our records.
+    </p>
+    <div class="btn-row">
+      <span></span>
+      <button class="btn" onclick="submitVaccineUpdate()">Save &amp; Continue</button>
+    </div>
+    <p class="error-text" id="vaccine-update-status" style="display:none; margin-top:8px;"></p>
+  </div>
   <p class="error-text" id="dog-error" style="display:none"></p>
   <div class="btn-row">
     <button class="btn-link" onclick="showStep('owner')">Back</button>
@@ -386,6 +398,7 @@
     container.innerHTML = dogCards + addNewCard;
     newDogFields.style.display = 'none';
     document.getElementById('dog-form-gate').style.display = 'none';
+    document.getElementById('vaccine-update-gate').style.display = 'none';
 
     if (!state.dogs.length) {
       selectDog('__new__');
@@ -402,28 +415,107 @@
     const useInlineNewDogFields = dogId === '__new__' && !state.client.newDogFormUrl;
     document.getElementById('new-dog-fields').style.display = useInlineNewDogFields ? 'block' : 'none';
     document.getElementById('dog-form-gate').style.display = 'none';
+    document.getElementById('vaccine-update-gate').style.display = 'none';
   }
 
-  // Points a dog owner at this business's own GHL Form (which their Workflow
-  // uses to create/update the Dog object, including vaccine records and any
+  // Points a new dog's owner at this business's own GHL Form (which their
+  // Workflow uses to create the Dog object, including vaccine records and any
   // uploaded proof) instead of collecting that here, and blocks continuing
   // until a recheck confirms it actually went through — see recheckDogForm().
-  function showDogFormGate(type, dog) {
+  // (Existing-dog vaccine updates use showVaccineUpdateGate() instead — see
+  // there for why this form-based approach isn't used for that case.)
+  function showDogFormGate() {
     const gate = document.getElementById('dog-form-gate');
-    const message = document.getElementById('dog-form-gate-message');
-    const link = document.getElementById('dog-form-gate-link');
+    document.getElementById('dog-form-gate-message').textContent =
+      "Since this is a new dog, please fill out our dog intake & vaccine records form before continuing.";
+    document.getElementById('dog-form-gate-link').href = state.client.newDogFormUrl;
     document.getElementById('dog-form-gate-status').style.display = 'none';
-
-    if (type === 'new') {
-      message.textContent = "Since this is a new dog, please fill out our dog intake & vaccine records form before continuing.";
-      link.href = state.client.newDogFormUrl;
-    } else {
-      message.textContent = `${dog?.name ?? 'This dog'}'s vaccine records are missing or expired — please fill out our vaccine update form before continuing.`;
-      link.href = state.client.vaccineUpdateFormUrl;
-    }
-    gate.dataset.gateType = type;
     document.getElementById('new-dog-fields').style.display = 'none';
     gate.style.display = 'block';
+  }
+
+  // Collects updated vaccine expiration dates for one specific existing dog
+  // and saves them directly to that one GHL record (see PUT
+  // /api/bookings/dogs/:id/vaccines) — deliberately NOT routed through this
+  // business's GHL Form/Workflow, because GHL's "Update Associated Record for
+  // Contact" action has no way to target a single record: it updates every
+  // record tied to the contact under that association label, so renewing one
+  // dog's vaccines silently overwrote every other dog on the same contact
+  // (confirmed live). The optional upload link still points at that form,
+  // since the uploaded proof itself just needs to land on the contact record,
+  // which the existing form already does correctly.
+  async function showVaccineUpdateGate(dog) {
+    document.getElementById('new-dog-fields').style.display = 'none';
+    document.getElementById('dog-form-gate').style.display = 'none';
+
+    const gate = document.getElementById('vaccine-update-gate');
+    document.getElementById('vaccine-update-message').textContent =
+      `${dog?.name ?? 'This dog'}'s vaccine records are missing or expired — please enter the current expiration date(s) below before continuing.`;
+    document.getElementById('vaccine-update-status').style.display = 'none';
+
+    const uploadHint = document.getElementById('vaccine-update-upload-hint');
+    if (state.client.vaccineUpdateFormUrl) {
+      document.getElementById('vaccine-update-upload-link').href = state.client.vaccineUpdateFormUrl;
+      uploadHint.style.display = 'block';
+    } else {
+      uploadHint.style.display = 'none';
+    }
+
+    const vaccineKeys = JSON.parse(state.client.dogVaccineFieldKeys || '[]');
+    const fieldsContainer = document.getElementById('vaccine-update-fields');
+    fieldsContainer.innerHTML = '<p class="hint-text">Loading…</p>';
+    gate.dataset.dogId = dog.id;
+    gate.style.display = 'block';
+
+    const res = await fetch(API(`/api/settings/dog-object-fields?objectKey=${encodeURIComponent(state.client.dogObjectKey)}`));
+    const allFieldLabels = res.ok ? (await res.json()).fields : [];
+
+    fieldsContainer.innerHTML = vaccineKeys.map((key) => {
+      const label = allFieldLabels.find((f) => f.fieldKey === key)?.name ?? key;
+      return `
+        <div class="field-row full">
+          <div>
+            <label class="field-label">${label}</label>
+            <input type="date" class="vaccine-update-input" data-field-key="${key}">
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function submitVaccineUpdate() {
+    const gate = document.getElementById('vaccine-update-gate');
+    const statusEl = document.getElementById('vaccine-update-status');
+    statusEl.style.display = 'none';
+
+    const vaccineDates = {};
+    let missingDate = false;
+    document.querySelectorAll('.vaccine-update-input').forEach((input) => {
+      if (!input.value) missingDate = true;
+      vaccineDates[input.dataset.fieldKey] = input.value;
+    });
+    if (missingDate) {
+      statusEl.textContent = 'Please fill in every vaccine expiration date.';
+      statusEl.style.display = 'block';
+      return;
+    }
+
+    const dogId = gate.dataset.dogId;
+    const res = await fetch(API(`/api/bookings/dogs/${dogId}/vaccines`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vaccineDates }),
+    });
+    if (!res.ok) {
+      statusEl.textContent = "Couldn't save those dates — please try again.";
+      statusEl.style.display = 'block';
+      return;
+    }
+
+    state.ghlDogObjectId = dogId;
+    gate.style.display = 'none';
+    renderServiceOptions();
+    showStep('service');
   }
 
   // Re-runs the same owner lookup to pull a fresh dogs list from GHL, since
@@ -468,7 +560,7 @@
 
     if (state.selectedDogId === '__new__') {
       if (state.client.newDogFormUrl) {
-        showDogFormGate('new');
+        showDogFormGate();
         return;
       }
 
@@ -494,11 +586,9 @@
       state.ghlDogObjectId = dog.id;
     } else {
       const dog = state.dogs.find((d) => d.id === state.selectedDogId);
-      const needsVaccineUpdate = state.client.vaccineUpdateFormUrl
-        && dog?.vaccine?.tracked
-        && (dog.vaccine.missing || !dog.vaccine.current);
+      const needsVaccineUpdate = dog?.vaccine?.tracked && (dog.vaccine.missing || !dog.vaccine.current);
       if (needsVaccineUpdate) {
-        showDogFormGate('vaccine', dog);
+        showVaccineUpdateGate(dog);
         return;
       }
       state.ghlDogObjectId = state.selectedDogId;
