@@ -37,8 +37,10 @@ router.get('/vaccine-file-upload-test', async (req, res) => {
     let uploadResult = null;
     if (vaccineFileField && record?.id) {
       const form = new FormData();
-      const blob = new Blob(['test file contents'], { type: 'text/plain' });
-      form.append(`${vaccineFileField.id}_debugtest123`, blob, 'test.txt');
+      // Minimal valid 1x1 transparent PNG — the field only accepts pdf/doc/xls/csv/jpeg/jpg/png/gif.
+      const pngBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+      const blob = new Blob([pngBytes], { type: 'image/png' });
+      form.append(`${vaccineFileField.id}_debugtest123`, blob, 'test.png');
       form.append('id', record.id);
       form.append('maxFiles', '1');
 
