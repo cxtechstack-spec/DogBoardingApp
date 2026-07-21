@@ -60,23 +60,36 @@ router.get('/vaccine-file-upload-test', async (req, res) => {
       // It didn't — try explicitly setting the field via a normal record update,
       // using the URL the upload call returned.
       let uploadedUrl = null;
+      let uploadMeta = null;
       try {
         const parsedUpload = JSON.parse(uploadText);
         uploadedUrl = Object.values(parsedUpload.uploadedFiles || {})[0] || null;
+        uploadMeta = (parsedUpload.meta || [])[0] || null;
       } catch {}
 
       if (uploadedUrl) {
-        const updateRes = await fetch(`${BASE_URL}/objects/${objectKey}/records/${record.id}?locationId=${locationId}`, {
-          method: 'PUT',
-          headers: { ...headers, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ properties: { vaccine_upload: [uploadedUrl] } }),
-        });
-        const updateText = await updateRes.text();
-        uploadResult.explicitUpdateAttempt = { status: updateRes.status, body: updateText };
-
-        const recheck2Res = await fetch(`${BASE_URL}/objects/${objectKey}/records/${record.id}?locationId=${locationId}`, { headers });
-        const recheck2Data = await recheck2Res.json();
-        uploadResult.recheckRecordAfterExplicitUpdate = recheck2Data.record ?? recheck2Data;
+        const attempts = {
+          metaObjectArray: [uploadMeta],
+          urlNameObjectArray: [{ url: uploadedUrl, name: uploadMeta?.originalname }],
+          bareUrlNoArray: uploadedUrl,
+        };
+        uploadResult.updateAttempts = {};
+        for (const [label, value] of Object.entries(attempts)) {
+          const updateRes = await fetch(`${BASE_URL}/objects/${objectKey}/records/${record.id}?locationId=${locationId}`, {
+            method: 'PUT',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ properties: { vaccine_upload: value } }),
+          });
+          const updateText = await updateRes.text();
+          const recheck2Res = await fetch(`${BASE_URL}/objects/${objectKey}/records/${record.id}?locationId=${locationId}`, { headers });
+          const recheck2Data = await recheck2Res.json();
+          uploadResult.updateAttempts[label] = {
+            requestValue: value,
+            status: updateRes.status,
+            body: updateText,
+            propertiesAfter: (recheck2Data.record ?? recheck2Data).properties,
+          };
+        }
       }
     }
 
@@ -90,7 +103,7 @@ router.get('/vaccine-file-upload-test', async (req, res) => {
       deleteResult = { status: delRes.status, body: delText };
     }
 
-    res.json({ debugVersion: 6, objectKey, allFields, vaccineFileField, createStatus: createRes.status, record, uploadResult, deleteResult });
+    res.json({ debugVersion: 7, objectKey, allFields, vaccineFileField, createStatus: createRes.status, record, uploadResult, deleteResult });
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
   }
