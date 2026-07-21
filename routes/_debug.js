@@ -66,10 +66,10 @@ router.get('/vaccine-file-upload-test', async (req, res) => {
       } catch {}
 
       if (uploadedUrl) {
-        const updateRes = await fetch(`${BASE_URL}/objects/${objectKey}/records/${record.id}`, {
+        const updateRes = await fetch(`${BASE_URL}/objects/${objectKey}/records/${record.id}?locationId=${locationId}`, {
           method: 'PUT',
           headers: { ...headers, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ locationId, properties: { vaccine_upload: uploadedUrl } }),
+          body: JSON.stringify({ properties: { vaccine_upload: uploadedUrl } }),
         });
         const updateText = await updateRes.text();
         uploadResult.explicitUpdateAttempt = { status: updateRes.status, body: updateText };
