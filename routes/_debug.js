@@ -90,7 +90,7 @@ router.get('/vaccine-file-upload-test', async (req, res) => {
       deleteResult = { status: delRes.status, body: delText };
     }
 
-    res.json({ objectKey, allFields, vaccineFileField, createStatus: createRes.status, record, uploadResult, deleteResult });
+    res.json({ debugVersion: 6, objectKey, allFields, vaccineFileField, createStatus: createRes.status, record, uploadResult, deleteResult });
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
   }
