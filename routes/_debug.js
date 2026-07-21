@@ -52,10 +52,32 @@ router.get('/vaccine-file-upload-test', async (req, res) => {
       const uploadText = await uploadRes.text();
       uploadResult = { status: uploadRes.status, body: uploadText };
 
-      // Re-fetch the record to see if the field actually got set.
+      // Re-fetch the record to see if the field actually got set by the upload call alone.
       const recheckRes = await fetch(`${BASE_URL}/objects/${objectKey}/records/${record.id}?locationId=${locationId}`, { headers });
       const recheckData = await recheckRes.json();
       uploadResult.recheckRecord = recheckData.record ?? recheckData;
+
+      // It didn't — try explicitly setting the field via a normal record update,
+      // using the URL the upload call returned.
+      let uploadedUrl = null;
+      try {
+        const parsedUpload = JSON.parse(uploadText);
+        uploadedUrl = Object.values(parsedUpload.uploadedFiles || {})[0] || null;
+      } catch {}
+
+      if (uploadedUrl) {
+        const updateRes = await fetch(`${BASE_URL}/objects/${objectKey}/records/${record.id}`, {
+          method: 'PUT',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ locationId, properties: { vaccine_upload: uploadedUrl } }),
+        });
+        const updateText = await updateRes.text();
+        uploadResult.explicitUpdateAttempt = { status: updateRes.status, body: updateText };
+
+        const recheck2Res = await fetch(`${BASE_URL}/objects/${objectKey}/records/${record.id}?locationId=${locationId}`, { headers });
+        const recheck2Data = await recheck2Res.json();
+        uploadResult.recheckRecordAfterExplicitUpdate = recheck2Data.record ?? recheck2Data;
+      }
     }
 
     let deleteResult = null;
