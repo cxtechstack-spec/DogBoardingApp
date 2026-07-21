@@ -483,6 +483,16 @@
     }).join('');
   }
 
+  // These fields are plain TEXT in GHL, not real date fields, so whatever
+  // string we send is exactly what staff see in the object list — match the
+  // "July 7, 2026" style the business's own form already produces there,
+  // instead of the <input type="date">'s raw "2026-07-07".
+  function formatDateForGhl(isoDateStr) {
+    const [year, month, day] = isoDateStr.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+  }
+
   async function submitVaccineUpdate() {
     const gate = document.getElementById('vaccine-update-gate');
     const statusEl = document.getElementById('vaccine-update-status');
@@ -492,7 +502,7 @@
     let missingDate = false;
     document.querySelectorAll('.vaccine-update-input').forEach((input) => {
       if (!input.value) missingDate = true;
-      vaccineDates[input.dataset.fieldKey] = input.value;
+      else vaccineDates[input.dataset.fieldKey] = formatDateForGhl(input.value);
     });
     if (missingDate) {
       statusEl.textContent = 'Please fill in every vaccine expiration date.';
