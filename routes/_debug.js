@@ -24,7 +24,7 @@ router.get('/vaccine-file-upload-test', async (req, res) => {
     const fieldsRes = await fetch(`${BASE_URL}/objects/${objectKey}?locationId=${locationId}`, { headers });
     const fieldsData = await fieldsRes.json();
     const allFields = (fieldsData.fields || []).map((f) => ({ id: f.id, name: f.name, fieldKey: f.fieldKey, dataType: f.dataType }));
-    const vaccineFileField = (fieldsData.fields || []).find((f) => /vaccine file/i.test(f.name));
+    const vaccineFileField = (fieldsData.fields || []).find((f) => f.dataType === 'FILE_UPLOAD');
 
     const createRes = await fetch(`${BASE_URL}/objects/${objectKey}/records`, {
       method: 'POST',
@@ -57,7 +57,7 @@ router.get('/vaccine-file-upload-test', async (req, res) => {
 
     let deleteResult = null;
     if (record?.id) {
-      const delRes = await fetch(`${BASE_URL}/objects/${objectKey}/records/${record.id}?locationId=${locationId}`, {
+      const delRes = await fetch(`${BASE_URL}/objects/${objectKey}/records/${record.id}`, {
         method: 'DELETE',
         headers,
       });
@@ -68,6 +68,27 @@ router.get('/vaccine-file-upload-test', async (req, res) => {
     res.json({ objectKey, allFields, vaccineFileField, createStatus: createRes.status, record, uploadResult, deleteResult });
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
+// One-off cleanup for a record orphaned by an earlier DELETE bug in this file.
+router.get('/cleanup-record', async (req, res) => {
+  try {
+    const locationId = req.query.location_id;
+    const recordId = req.query.recordId;
+    const client = await db.client.findUnique({ where: { ghlLocationId: locationId } });
+    if (!client) return res.status(404).json({ error: 'client not found' });
+    const token = decrypt(client.ghlApiTokenEncrypted);
+    const headers = { Authorization: `Bearer ${token}`, Version: API_VERSION, Accept: 'application/json' };
+
+    const delRes = await fetch(`${BASE_URL}/objects/${client.dogObjectKey}/records/${recordId}`, {
+      method: 'DELETE',
+      headers,
+    });
+    const delText = await delRes.text();
+    res.json({ status: delRes.status, body: delText });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
