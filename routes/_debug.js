@@ -39,7 +39,8 @@ router.get('/vaccine-file-upload-test', async (req, res) => {
       const form = new FormData();
       const blob = new Blob(['test file contents'], { type: 'text/plain' });
       form.append(`${vaccineFileField.id}_debugtest123`, blob, 'test.txt');
-      form.append('recordId', record.id);
+      form.append('id', record.id);
+      form.append('maxFiles', '1');
 
       const uploadRes = await fetch(`${BASE_URL}/locations/${locationId}/customFields/upload`, {
         method: 'POST',
