@@ -2,7 +2,6 @@ import 'dotenv/config';
 import express from 'express';
 import settingsRouter from './routes/settings.js';
 import bookingsRouter from './routes/bookings.js';
-import debugRouter from './routes/_debug.js';
 
 const app = express();
 app.use(express.json());
@@ -11,7 +10,6 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static('public'));
 app.use('/api/settings', settingsRouter);
 app.use('/api/bookings', bookingsRouter);
-app.use('/api/_debug', debugRouter);
 
 // Catches errors forwarded by asyncHandler (or thrown synchronously in any
 // route) so a single bad request returns a 500 response instead of crashing
