@@ -8,7 +8,7 @@ import db from '../lib/db.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { decrypt } from '../lib/crypto.js';
 import { checkPoolAvailability } from '../lib/availability.js';
-import { computeBookingQuote, computeStayTotalFromBooking } from '../lib/quote.js';
+import { computeBookingQuote, computeStayTotalFromBooking, countUnits } from '../lib/quote.js';
 import { createAndSendInvoice, getInvoiceStatus } from '../lib/ghl-invoices.js';
 import { notifyStaff } from '../lib/ghl-notifications.js';
 import {
@@ -133,10 +133,14 @@ async function validateBookingRequest({ client, serviceType, startDate, endDate,
     throw err;
   }
 
+  // The cap is per day of the stay, not a flat total — a 5-night stay wanting
+  // one dock-diving session per night is 5 total, not 1.
+  const stayUnits = countUnits(startDate, endDate, service.billingUnit);
+  const maxAddOnsTotal = client.maxAddOnsPerDay * stayUnits;
   const requestedAddOns = Array.isArray(addOnsSelected) ? addOnsSelected : [];
   const totalQty = requestedAddOns.reduce((sum, a) => sum + (parseInt(a.qty) || 0), 0);
-  if (totalQty > client.maxAddOnsPerDay) {
-    const err = new Error(`Add-ons selected (${totalQty}) exceed the max of ${client.maxAddOnsPerDay} per day`);
+  if (totalQty > maxAddOnsTotal) {
+    const err = new Error(`Add-ons selected (${totalQty}) exceed the max of ${client.maxAddOnsPerDay} per day (${maxAddOnsTotal} total for this ${stayUnits}-${service.billingUnit === 'NIGHT' ? 'night' : 'day'} stay)`);
     err.statusCode = 400;
     throw err;
   }

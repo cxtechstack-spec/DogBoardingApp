@@ -664,6 +664,14 @@
     return Object.values(state.selectedAddOns).reduce((sum, qty) => sum + qty, 0);
   }
 
+  // NIGHT billing counts nights stayed (checkout day isn't a night); DAY billing counts inclusive days.
+  // Mirrors lib/quote.js's countUnits — also used to scale the per-day add-on cap to the stay length.
+  function stayUnits() {
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const dayDiff = Math.round((new Date(state.endDate) - new Date(state.startDate)) / msPerDay);
+    return Math.max(1, state.service.billingUnit === 'NIGHT' ? dayDiff : dayDiff + 1);
+  }
+
   function renderAddonOptions() {
     const container = document.getElementById('addon-options');
     const addOns = state.client.addOns;
@@ -682,7 +690,10 @@
       </div>
     `).join('');
 
-    document.getElementById('addon-cap-hint').textContent = `Max ${state.client.maxAddOnsPerDay} add-ons per day.`;
+    const units = stayUnits();
+    const unitLabel = state.service.billingUnit === 'NIGHT' ? 'night' : 'day';
+    document.getElementById('addon-cap-hint').textContent =
+      `Max ${state.client.maxAddOnsPerDay} add-ons per day — up to ${state.client.maxAddOnsPerDay * units} total for this ${units}-${unitLabel} stay.`;
   }
 
   function updateAddOnQty(addOnId) {
@@ -690,7 +701,7 @@
     let qty = Math.max(0, parseInt(input.value) || 0);
 
     const otherTotal = addOnQtyTotal() - (state.selectedAddOns[addOnId] || 0);
-    const maxAllowed = state.client.maxAddOnsPerDay - otherTotal;
+    const maxAllowed = (state.client.maxAddOnsPerDay * stayUnits()) - otherTotal;
     if (qty > maxAllowed) {
       qty = Math.max(0, maxAllowed);
       input.value = qty;
@@ -704,10 +715,7 @@
   }
 
   function computeQuote() {
-    const msPerDay = 24 * 60 * 60 * 1000;
-    const dayDiff = Math.round((new Date(state.endDate) - new Date(state.startDate)) / msPerDay);
-    // NIGHT billing counts nights stayed (checkout day isn't a night); DAY billing counts inclusive days.
-    const units = Math.max(1, state.service.billingUnit === 'NIGHT' ? dayDiff : dayDiff + 1);
+    const units = stayUnits();
     const serviceCost = state.service.baseRate * units;
 
     const addOnLines = Object.entries(state.selectedAddOns).map(([addOnId, qty]) => {
