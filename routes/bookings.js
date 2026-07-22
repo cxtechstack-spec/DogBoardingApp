@@ -8,7 +8,7 @@ import db from '../lib/db.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { decrypt } from '../lib/crypto.js';
 import { checkPoolAvailability } from '../lib/availability.js';
-import { computeBookingQuote, computeStayTotalFromBooking, countUnits } from '../lib/quote.js';
+import { computeStayTotalFromBooking, computeDepositFromBooking, countUnits } from '../lib/quote.js';
 import { createAndSendInvoice, getInvoiceStatus } from '../lib/ghl-invoices.js';
 import { notifyStaff } from '../lib/ghl-notifications.js';
 import {
@@ -73,11 +73,14 @@ function buildDogFieldMap(client) {
 // the calendar view, which need the same live-resolved GHL + unit info per booking.
 // Degrades gracefully (dog: null) if the mapping isn't configured yet, rather than
 // failing the whole dashboard — staff should still see requests either way.
-async function enrichBooking(booking, dogFieldMap, token) {
-  const [dogRecord, contact, unit] = await Promise.all([
+async function enrichBooking(booking, dogFieldMap, locationId, token) {
+  const [dogRecord, contact, unit, depositStatus] = await Promise.all([
     dogFieldMap.objectKey ? getDogRecord(booking.ghlDogObjectId, dogFieldMap.objectKey, token) : null,
     getContact(booking.ghlOwnerContactId, token),
     booking.unitId ? db.unit.findUnique({ where: { id: booking.unitId } }) : null,
+    // null here means "no deposit was required for this booking", not "unknown" —
+    // ghlInvoiceId only ever gets set at Confirm time when a deposit applies.
+    booking.ghlInvoiceId ? getInvoiceStatus(booking.ghlInvoiceId, locationId, token).catch(() => null) : null,
   ]);
   return {
     ...booking,
@@ -86,6 +89,7 @@ async function enrichBooking(booking, dogFieldMap, token) {
     owner: contact ? { name: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim(), phone: contact.phone, email: contact.email } : null,
     vaccine: dogRecord ? vaccineStatusFromRecord(dogRecord, dogFieldMap.vaccineKeys) : { tracked: false, current: false, missing: false, expirationDate: null },
     unit: unit ? { id: unit.id, name: unit.name } : null,
+    deposit: booking.ghlInvoiceId ? { required: true, paid: depositStatus?.paid ?? null } : { required: false, paid: null },
   };
 }
 
@@ -262,65 +266,12 @@ router.put('/dogs/:id/vaccines', asyncHandler(async (req, res) => {
   res.json({ dog });
 }));
 
-// POST /api/bookings/invoices?location_id=
-// Creates and sends a GHL invoice for exactly the deposit amount (never GHL's
-// Partial Payment/Payment Plan features — see lib/ghl-invoices.js for why).
-// Returns the hosted payment URL the client is redirected to.
-router.post('/invoices', asyncHandler(async (req, res) => {
-  const locationId = req.query.location_id;
-  if (!locationId) return res.status(400).json({ error: 'location_id required' });
-
-  const { serviceType, startDate, endDate, addOnsSelected, ghlOwnerContactId } = req.body;
-  if (!serviceType || !startDate || !endDate || !ghlOwnerContactId) {
-    return res.status(400).json({ error: 'serviceType, startDate, endDate, and ghlOwnerContactId required' });
-  }
-
-  const client = await getClient(locationId);
-  if (!client) return res.status(404).json({ error: 'Client not found' });
-  const token = requireGhlToken(client);
-
-  const { service } = await validateBookingRequest({ client, serviceType, startDate, endDate, addOnsSelected });
-
-  const quote = computeBookingQuote({ service, startDate, endDate, addOnsSelected, addOns: client.addOns });
-  if (quote.deposit <= 0) {
-    return res.status(400).json({ error: 'This service has no deposit configured — nothing to invoice' });
-  }
-
-  const contact = await getContact(ghlOwnerContactId, token);
-  if (!contact) return res.status(404).json({ error: 'Owner contact not found' });
-
-  const { invoiceId, paymentUrl } = await createAndSendInvoice({
-    locationId,
-    contact,
-    description: `Deposit — ${SERVICE_LABELS[serviceType] || serviceType} (${startDate} to ${endDate})`,
-    amount: quote.deposit,
-    token,
-  });
-
-  if (!paymentUrl) {
-    console.warn(`Invoice ${invoiceId} sent but no payment URL could be extracted from the notification`);
-  }
-
-  res.status(201).json({ invoiceId, paymentUrl, quote });
-}));
-
-// GET /api/bookings/invoices/:invoiceId?location_id=
-// Live payment status check — used before finalizing a booking.
-router.get('/invoices/:invoiceId', asyncHandler(async (req, res) => {
-  const locationId = req.query.location_id;
-  if (!locationId) return res.status(400).json({ error: 'location_id required' });
-
-  const client = await getClient(locationId);
-  if (!client) return res.status(404).json({ error: 'Client not found' });
-  const token = requireGhlToken(client);
-
-  const status = await getInvoiceStatus(req.params.invoiceId, locationId, token);
-  res.json(status);
-}));
-
 // POST /api/bookings?location_id=
 // Creates a booking request. Capacity is a hard gate; vaccine status is
-// informational only and never blocks submission. Requires a paid deposit invoice.
+// informational only and never blocks submission. No payment is collected at
+// this point — the deposit invoice is only created once staff confirm the
+// booking (see PUT /:id/confirm), so a denied request was never charged
+// anything to begin with.
 router.post('/', asyncHandler(async (req, res) => {
   const locationId = req.query.location_id;
   if (!locationId) return res.status(400).json({ error: 'location_id required' });
@@ -332,7 +283,6 @@ router.post('/', asyncHandler(async (req, res) => {
     addOnsSelected,
     ghlDogObjectId,
     ghlOwnerContactId,
-    invoiceId,
   } = req.body;
 
   if (!serviceType || !startDate || !endDate || !ghlDogObjectId || !ghlOwnerContactId) {
@@ -344,20 +294,6 @@ router.post('/', asyncHandler(async (req, res) => {
   const token = requireGhlToken(client);
 
   const { service, requestedAddOns } = await validateBookingRequest({ client, serviceType, startDate, endDate, addOnsSelected });
-
-  // Only require a paid deposit invoice if this service actually has a deposit
-  // configured — POST /invoices refuses to create a $0 invoice, so a service
-  // with no deposit must be able to skip this check entirely.
-  const quote = computeBookingQuote({ service, startDate, endDate, addOnsSelected, addOns: client.addOns });
-  if (quote.deposit > 0) {
-    if (!invoiceId) {
-      return res.status(402).json({ error: 'A paid deposit invoice is required to submit a booking request' });
-    }
-    const invoiceStatus = await getInvoiceStatus(invoiceId, locationId, token);
-    if (!invoiceStatus.paid) {
-      return res.status(402).json({ error: 'Deposit invoice has not been paid yet' });
-    }
-  }
 
   const snapshotAddOns = requestedAddOns.map((requested) => {
     const addOn = client.addOns.find((a) => a.id === requested.addOnId);
@@ -386,7 +322,6 @@ router.post('/', asyncHandler(async (req, res) => {
       addOnsSelected: JSON.stringify(snapshotAddOns),
       status: 'REQUESTED',
       lockedRate: service.baseRate,
-      ghlInvoiceId: invoiceId ?? null,
       vaccineCheckBooking: JSON.stringify(vaccineCheck),
     },
   });
@@ -418,7 +353,7 @@ router.get('/', asyncHandler(async (req, res) => {
     orderBy: { startDate: 'asc' },
   });
 
-  const enriched = await Promise.all(bookings.map((b) => enrichBooking(b, dogFieldMap, token)));
+  const enriched = await Promise.all(bookings.map((b) => enrichBooking(b, dogFieldMap, locationId, token)));
 
   res.json({ bookings: enriched });
 }));
@@ -449,7 +384,7 @@ router.get('/calendar', asyncHandler(async (req, res) => {
     orderBy: { startDate: 'asc' },
   });
 
-  const enriched = await Promise.all(bookings.map((b) => enrichBooking(b, dogFieldMap, token)));
+  const enriched = await Promise.all(bookings.map((b) => enrichBooking(b, dogFieldMap, locationId, token)));
 
   res.json({
     bookings: enriched,
@@ -465,7 +400,9 @@ router.get('/calendar', asyncHandler(async (req, res) => {
 // Staff picks a specific unit from the service's capacity pool — no auto-assignment.
 // A unit is a hard, single-occupancy resource, so overlapping-date double-booking
 // onto the same unit is rejected outright (unlike pool-wide capacity, which is a count).
-// Pure DB operation — no GHL call, no token needed.
+// If this service has a deposit configured, the deposit invoice is created and
+// sent here — not at request time — so a request that gets denied (no
+// availability, wrong breed, etc.) was never charged anything to begin with.
 router.put('/:id/confirm', asyncHandler(async (req, res) => {
   const { unitId } = req.body;
   if (!unitId) return res.status(400).json({ error: 'unitId required' });
@@ -503,9 +440,30 @@ router.put('/:id/confirm', asyncHandler(async (req, res) => {
     return res.status(409).json({ error: `${unit.name} is already booked for overlapping dates` });
   }
 
+  // Send the deposit invoice before touching the booking record, so a GHL
+  // failure here leaves the booking untouched (still REQUESTED) — staff just
+  // retry Confirm rather than ending up with a confirmed-but-uninvoiced stay.
+  let ghlInvoiceId = null;
+  const deposit = computeDepositFromBooking(booking, service);
+  if (deposit > 0) {
+    const token = requireGhlToken(client);
+    const contact = await getContact(booking.ghlOwnerContactId, token);
+    if (!contact) return res.status(404).json({ error: 'Owner contact not found' });
+
+    const dateRange = `${booking.startDate.toISOString().slice(0, 10)} to ${booking.endDate.toISOString().slice(0, 10)}`;
+    const created = await createAndSendInvoice({
+      locationId,
+      contact,
+      description: `Deposit — ${SERVICE_LABELS[booking.serviceType] || booking.serviceType} (${dateRange})`,
+      amount: deposit,
+      token,
+    });
+    ghlInvoiceId = created.invoiceId;
+  }
+
   const updated = await db.booking.update({
     where: { id: req.params.id },
-    data: { status: 'CONFIRMED', unitId },
+    data: { status: 'CONFIRMED', unitId, ghlInvoiceId },
   });
 
   res.json({ booking: updated });

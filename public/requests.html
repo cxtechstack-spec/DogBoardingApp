@@ -181,6 +181,16 @@
     return `<span class="badge ok">Vaccine current</span>`;
   }
 
+  // Only ever shown once a deposit invoice actually exists — sent at Confirm
+  // time (see PUT /:id/confirm), never before, so a REQUESTED booking never
+  // shows this at all.
+  function depositBadge(deposit) {
+    if (!deposit?.required) return '';
+    return deposit.paid
+      ? '<span class="badge ok">Deposit paid</span>'
+      : '<span class="badge danger">Deposit unpaid</span>';
+  }
+
   function bookingCardHtml(b, actionsHtml) {
     const addOnsText = b.addOnsSelected.length
       ? b.addOnsSelected.map((a) => `${a.name} x${a.qty}`).join(', ')
@@ -197,7 +207,10 @@
             <h2>${dogName}${dogBreed ? ` — ${dogBreed}` : ''}</h2>
             <div class="sub">${ownerName}${ownerContact ? ` · ${ownerContact}` : ''}</div>
           </div>
-          ${vaccineBadge(b.vaccine)}
+          <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+            ${vaccineBadge(b.vaccine)}
+            ${depositBadge(b.deposit)}
+          </div>
         </div>
         <div class="detail-grid">
           <div>

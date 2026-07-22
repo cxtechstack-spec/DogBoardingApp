@@ -125,15 +125,6 @@
 
     .summary-row.total { font-weight: 600; border-top: 1px solid #eee; margin-top: 8px; padding-top: 10px; }
 
-    .payment-placeholder {
-      border: 1px dashed #d0d0d0;
-      border-radius: 6px;
-      padding: 16px;
-      text-align: center;
-      color: #888;
-      font-size: 13px;
-      margin: 16px 0;
-    }
   </style>
 </head>
 <body>
@@ -271,32 +262,24 @@
   </div>
 </div>
 
-<!-- STEP 5: Review + Payment -->
+<!-- STEP 5: Review -->
 <div class="card step" id="step-review">
   <h2>Review &amp; Confirm</h2>
   <div id="review-summary"></div>
 
-  <div id="payment-section" style="display:none">
-    <div class="payment-placeholder" id="payment-status">
-      A deposit is required to submit your request. Click below to pay — a payment page will open in a new tab.
-    </div>
-    <div class="btn-row">
-      <span></span>
-      <button class="btn" id="pay-btn" onclick="payDeposit()">Pay Deposit</button>
-    </div>
-  </div>
+  <p class="hint-text" id="deposit-note" style="display:none; margin-top:8px;"></p>
 
   <p class="error-text" id="submit-error" style="display:none"></p>
   <div class="btn-row">
     <button class="btn-link" onclick="showStep('addons')">Back</button>
-    <button class="btn" id="submit-btn" onclick="submitBooking()" disabled>Submit Request</button>
+    <button class="btn" id="submit-btn" onclick="submitBooking()">Submit Request</button>
   </div>
 </div>
 
 <!-- STEP 6: Done -->
 <div class="card step" id="step-done">
   <h2>Request Submitted</h2>
-  <p>Thanks! Your request has been sent to the business for review. You'll hear back once it's confirmed.</p>
+  <p id="done-message">Thanks! Your request has been sent to the business for review. You'll hear back once it's confirmed.</p>
 </div>
 
 <script>
@@ -321,8 +304,6 @@
     endDate: null,
     selectedAddOns: {}, // addOnId -> qty
     quote: null,
-    invoiceId: null,
-    paymentUrl: null,
   };
 
   function showStep(name) {
@@ -767,80 +748,26 @@
   function goToReview() {
     const quote = computeQuote();
     state.quote = quote;
-    state.invoiceId = null;
-    state.paymentUrl = null;
 
     const summary = document.getElementById('review-summary');
     summary.innerHTML = `
       <div class="summary-row"><span>${SERVICE_LABELS[state.serviceType]} (${quote.units} ${state.service.billingUnit.toLowerCase()}${quote.units > 1 ? 's' : ''})</span><span>$${quote.serviceCost.toFixed(2)}</span></div>
       ${quote.addOnLines.map((l) => `<div class="summary-row"><span>${l.name} x${l.qty}</span><span>$${l.lineTotal.toFixed(2)}</span></div>`).join('')}
       <div class="summary-row total"><span>Estimated Total</span><span>$${quote.subtotal.toFixed(2)}</span></div>
-      <div class="summary-row"><span>Deposit Due Now</span><span>$${quote.deposit.toFixed(2)}</span></div>
     `;
 
-    const paymentSection = document.getElementById('payment-section');
-    const submitBtn = document.getElementById('submit-btn');
+    // No payment is collected here — the deposit invoice is only sent once
+    // the business approves this request (see PUT /:id/confirm), so nothing
+    // is ever charged for a request that ends up denied.
+    const depositNote = document.getElementById('deposit-note');
     if (quote.deposit > 0) {
-      paymentSection.style.display = 'block';
-      document.getElementById('payment-status').textContent = 'A deposit is required to submit your request. Click below to pay — a payment page will open in a new tab.';
-      document.getElementById('pay-btn').disabled = false;
-      document.getElementById('pay-btn').textContent = 'Pay Deposit';
-      submitBtn.disabled = true;
+      depositNote.textContent = `A deposit of $${quote.deposit.toFixed(2)} will be due once your request is approved — you'll get a payment link by email at that time.`;
+      depositNote.style.display = 'block';
     } else {
-      paymentSection.style.display = 'none';
-      submitBtn.disabled = false;
+      depositNote.style.display = 'none';
     }
 
     showStep('review');
-  }
-
-  async function payDeposit() {
-    const payBtn = document.getElementById('pay-btn');
-    const statusEl = document.getElementById('payment-status');
-
-    // Already have an invoice from a previous click — just reopen it instead
-    // of creating a new one each time.
-    if (state.invoiceId && state.paymentUrl) {
-      window.open(state.paymentUrl, '_blank');
-      return;
-    }
-
-    payBtn.disabled = true;
-    payBtn.textContent = 'Creating invoice…';
-
-    const res = await fetch(API('/api/bookings/invoices'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        serviceType: state.serviceType,
-        startDate: state.startDate,
-        endDate: state.endDate,
-        addOnsSelected: Object.entries(state.selectedAddOns).map(([addOnId, qty]) => ({ addOnId, qty })),
-        ghlOwnerContactId: state.contact.id,
-      }),
-    });
-
-    if (!res.ok) {
-      const { error } = await res.json();
-      statusEl.textContent = error;
-      payBtn.disabled = false;
-      payBtn.textContent = 'Pay Deposit';
-      return;
-    }
-
-    const { invoiceId, paymentUrl } = await res.json();
-    state.invoiceId = invoiceId;
-    state.paymentUrl = paymentUrl;
-
-    if (paymentUrl) {
-      window.open(paymentUrl, '_blank');
-      statusEl.textContent = 'Complete payment in the new tab, then click Submit Request below.';
-    } else {
-      statusEl.textContent = 'Your invoice was created but we couldn\'t open it automatically — check your email, then click Submit Request below once paid.';
-    }
-    payBtn.textContent = 'Reopen Payment Page';
-    payBtn.disabled = false;
-    document.getElementById('submit-btn').disabled = false;
   }
 
   async function submitBooking() {
@@ -857,7 +784,6 @@
         addOnsSelected: Object.entries(state.selectedAddOns).map(([addOnId, qty]) => ({ addOnId, qty })),
         ghlDogObjectId: state.ghlDogObjectId,
         ghlOwnerContactId: state.contact.id,
-        invoiceId: state.invoiceId,
       }),
     });
 
@@ -868,6 +794,9 @@
       return;
     }
 
+    document.getElementById('done-message').textContent = state.quote.deposit > 0
+      ? "Thanks! Your request has been sent to the business for review. If approved, you'll get an email with a deposit payment link."
+      : "Thanks! Your request has been sent to the business for review. You'll hear back once it's confirmed.";
     showStep('done');
   }
 
