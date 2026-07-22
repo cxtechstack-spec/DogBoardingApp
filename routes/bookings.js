@@ -95,13 +95,17 @@ const SERVICE_LABELS = { BOARDING: 'Boarding', DAY_CARE: 'Day Care', DAY_TRAININ
 const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 
 // Best-effort — a failed notification never fails or delays the booking itself.
-async function notifyBookingRequest({ client, booking, dogFieldMap, locationId, token }) {
+async function notifyBookingRequest({ client, booking, dogFieldMap, vaccineCheck, locationId, token }) {
   const dogRecord = dogFieldMap.objectKey
     ? await getDogRecord(booking.ghlDogObjectId, dogFieldMap.objectKey, token).catch(() => null)
     : null;
   const dogName = dogRecord ? dogSummaryFromRecord(dogRecord, dogFieldMap).name : 'a dog';
   const dateRange = `${booking.startDate.toISOString().slice(0, 10)} to ${booking.endDate.toISOString().slice(0, 10)}`;
-  const message = `New booking request: ${SERVICE_LABELS[booking.serviceType] || booking.serviceType} for ${dogName}, ${dateRange}. Review: ${APP_BASE_URL}/requests.html?location_id=${locationId}`;
+  const vaccineDetails = vaccineCheck?.details;
+  const vaccineFlag = vaccineDetails?.tracked && (vaccineDetails.missing || !vaccineDetails.current)
+    ? ' ⚠️ Vaccine records needed.'
+    : '';
+  const message = `New booking request: ${SERVICE_LABELS[booking.serviceType] || booking.serviceType} for ${dogName}, ${dateRange}.${vaccineFlag} Review: ${APP_BASE_URL}/requests.html?location_id=${locationId}`;
 
   await notifyStaff({
     locationId,
@@ -391,7 +395,7 @@ router.post('/', asyncHandler(async (req, res) => {
 
   // Fire-and-forget — staff should get the booking response fast regardless of SMS delivery.
   if (client.staffNotifyPhone) {
-    notifyBookingRequest({ client, booking, dogFieldMap, locationId, token }).catch((err) => {
+    notifyBookingRequest({ client, booking, dogFieldMap, vaccineCheck, locationId, token }).catch((err) => {
       console.warn(`Staff notification failed: ${err.message}`);
     });
   }

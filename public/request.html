@@ -194,19 +194,29 @@
     </div>
   </div>
   <div id="dog-form-gate" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid #f0f0f0;">
-    <p id="dog-form-gate-message" style="margin-bottom:12px;"></p>
+    <p id="dog-form-gate-message" style="margin-bottom:4px;"></p>
+    <p class="hint-text" style="margin-bottom:12px;">Vaccine records must be provided at least 5 days before your stay begins.</p>
     <div class="btn-row">
       <a id="dog-form-gate-link" href="#" target="_blank" rel="noopener" class="btn-link">Open Form</a>
       <button class="btn" onclick="recheckDogForm()">I've submitted it — Continue</button>
     </div>
+    <div class="btn-row" style="margin-top:4px;">
+      <button class="btn-link" onclick="skipVaccineStep()">Skip — I'll provide this before drop-off</button>
+      <span></span>
+    </div>
     <p class="error-text" id="dog-form-gate-status" style="display:none; margin-top:8px;"></p>
   </div>
   <div id="vaccine-update-gate" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid #f0f0f0;">
-    <p id="vaccine-update-message" style="margin-bottom:12px;"></p>
+    <p id="vaccine-update-message" style="margin-bottom:4px;"></p>
+    <p class="hint-text" style="margin-bottom:12px;">Vaccine records must be provided at least 5 days before your stay begins.</p>
     <div id="vaccine-update-fields"></div>
     <p class="hint-text" id="vaccine-update-upload-hint" style="display:none; margin:8px 0;">
       Please also <a id="vaccine-update-upload-link" href="#" target="_blank" rel="noopener">upload proof of vaccination</a> for our records.
     </p>
+    <div class="btn-row" style="margin-bottom:4px;">
+      <button class="btn-link" onclick="skipVaccineStep()">Skip — I'll provide this before drop-off</button>
+      <span></span>
+    </div>
     <div class="btn-row">
       <span></span>
       <button class="btn" onclick="submitVaccineUpdate()">Save &amp; Continue</button>
@@ -302,6 +312,8 @@
     dogs: [],
     selectedDogId: null,
     newDog: null,
+    skipNewDogForm: false,
+    activeGateType: null,
     ghlDogObjectId: null,
     serviceType: null,
     service: null,
@@ -407,12 +419,13 @@
 
   function selectDog(dogId) {
     state.selectedDogId = dogId;
+    state.skipNewDogForm = false;
     document.querySelectorAll('#dog-options .option-card').forEach((el) => {
       el.classList.toggle('selected', el.dataset.dogId === dogId);
     });
     // The intake form fully replaces these inline fields once a form URL is
-    // configured — see showDogFormGate().
-    const useInlineNewDogFields = dogId === '__new__' && !state.client.newDogFormUrl;
+    // configured (unless skipped) — see showDogFormGate()/skipVaccineStep().
+    const useInlineNewDogFields = dogId === '__new__' && (!state.client.newDogFormUrl || state.skipNewDogForm);
     document.getElementById('new-dog-fields').style.display = useInlineNewDogFields ? 'block' : 'none';
     document.getElementById('dog-form-gate').style.display = 'none';
     document.getElementById('vaccine-update-gate').style.display = 'none';
@@ -431,7 +444,25 @@
     document.getElementById('dog-form-gate-link').href = state.client.newDogFormUrl;
     document.getElementById('dog-form-gate-status').style.display = 'none';
     document.getElementById('new-dog-fields').style.display = 'none';
+    state.activeGateType = 'new';
     gate.style.display = 'block';
+  }
+
+  // Lets an owner move on without providing vaccine info right now — booking
+  // still proceeds, but the dog's vaccine status stays missing/expired, which
+  // is already surfaced to staff (see requests.html's vaccine badge, and the
+  // "Vaccine records needed" flag added to the new-booking staff text).
+  function skipVaccineStep() {
+    if (state.activeGateType === 'new') {
+      document.getElementById('dog-form-gate').style.display = 'none';
+      document.getElementById('new-dog-fields').style.display = 'block';
+      state.skipNewDogForm = true;
+    } else {
+      document.getElementById('vaccine-update-gate').style.display = 'none';
+      state.ghlDogObjectId = state.selectedDogId;
+      renderServiceOptions();
+      showStep('service');
+    }
   }
 
   // Collects updated vaccine expiration dates for one specific existing dog
@@ -452,6 +483,7 @@
     document.getElementById('vaccine-update-message').textContent =
       `${dog?.name ?? 'This dog'}'s vaccine records are missing or expired — please enter the current expiration date(s) below before continuing.`;
     document.getElementById('vaccine-update-status').style.display = 'none';
+    state.activeGateType = 'vaccine';
 
     const uploadHint = document.getElementById('vaccine-update-upload-hint');
     if (state.client.vaccineUpdateFormUrl) {
@@ -569,7 +601,7 @@
     }
 
     if (state.selectedDogId === '__new__') {
-      if (state.client.newDogFormUrl) {
+      if (state.client.newDogFormUrl && !state.skipNewDogForm) {
         showDogFormGate();
         return;
       }
