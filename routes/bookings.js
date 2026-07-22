@@ -348,9 +348,13 @@ router.get('/', asyncHandler(async (req, res) => {
   const dogFieldMap = buildDogFieldMap(client);
 
   const status = req.query.status || 'REQUESTED';
+  // Requests are sorted oldest-first (not by stay date) so that when two
+  // people want the same dates, staff naturally see who asked first and can
+  // give them first chance if the other gets denied. Confirmed/Active stay
+  // sorted by stay date, which is what matters for check-in/out planning.
   const bookings = await db.booking.findMany({
     where: { clientId: client.id, status },
-    orderBy: { startDate: 'asc' },
+    orderBy: status === 'REQUESTED' ? { createdAt: 'asc' } : { startDate: 'asc' },
   });
 
   const enriched = await Promise.all(bookings.map((b) => enrichBooking(b, dogFieldMap, locationId, token)));
@@ -361,7 +365,12 @@ router.get('/', asyncHandler(async (req, res) => {
 // GET /api/bookings/calendar?location_id=&start=&end=
 // Confirmed/Active bookings overlapping [start, end], enriched, plus the full
 // pool -> unit structure so the frontend can render every unit as a row —
-// including empty ones — not just occupied ones.
+// including empty ones — not just occupied ones. Also returns still-pending
+// REQUESTED bookings for the same range (they have no unit yet, so the
+// frontend renders them in a separate "Pending Requests" row per pool
+// instead) — staff asked for these to be visible on the calendar itself so
+// none get missed, sorted oldest-first so competing requests for the same
+// dates are handled in the order they came in.
 router.get('/calendar', asyncHandler(async (req, res) => {
   const locationId = req.query.location_id;
   const { start, end } = req.query;
@@ -373,21 +382,37 @@ router.get('/calendar', asyncHandler(async (req, res) => {
   const token = requireGhlToken(client);
   const dogFieldMap = buildDogFieldMap(client);
 
-  const bookings = await db.booking.findMany({
-    where: {
-      clientId: client.id,
-      status: { in: ['CONFIRMED', 'ACTIVE'] },
-      unitId: { not: null },
-      startDate: { lte: new Date(end) },
-      endDate: { gte: new Date(start) },
-    },
-    orderBy: { startDate: 'asc' },
-  });
+  const [bookings, pendingRequests] = await Promise.all([
+    db.booking.findMany({
+      where: {
+        clientId: client.id,
+        status: { in: ['CONFIRMED', 'ACTIVE'] },
+        unitId: { not: null },
+        startDate: { lte: new Date(end) },
+        endDate: { gte: new Date(start) },
+      },
+      orderBy: { startDate: 'asc' },
+    }),
+    db.booking.findMany({
+      where: {
+        clientId: client.id,
+        status: 'REQUESTED',
+        startDate: { lte: new Date(end) },
+        endDate: { gte: new Date(start) },
+      },
+      orderBy: { createdAt: 'asc' },
+    }),
+  ]);
 
   const enriched = await Promise.all(bookings.map((b) => enrichBooking(b, dogFieldMap, locationId, token)));
+  const enrichedPending = await Promise.all(pendingRequests.map(async (b) => ({
+    ...(await enrichBooking(b, dogFieldMap, locationId, token)),
+    capacityPoolId: client.services.find((s) => s.serviceType === b.serviceType)?.capacityPoolId ?? null,
+  })));
 
   res.json({
     bookings: enriched,
+    pendingRequests: enrichedPending,
     pools: client.capacityPools.map((p) => ({
       id: p.id,
       name: p.name,

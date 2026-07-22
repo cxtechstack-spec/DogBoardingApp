@@ -123,7 +123,10 @@
     }
 
     .cal-booking.active-status { background: #16a34a; }
+    .cal-booking.pending-status { background: #f59e0b; cursor: default; }
     .cal-booking.dragging { opacity: 0.4; }
+
+    .cal-unit-label.pending-label { color: #b45309; font-style: italic; }
 
     .cal-day-cell.drag-over { background: #eef2ff; }
 
@@ -233,30 +236,37 @@
       grid.innerHTML = `<p class="empty-state">${error || 'Could not load calendar.'}</p>`;
       return;
     }
-    const { bookings, pools } = await res.json();
+    const { bookings, pendingRequests, pools } = await res.json();
 
     if (!pools.some((p) => p.units.length)) {
       grid.innerHTML = '<p class="empty-state">No units configured yet — add some in Settings first.</p>';
       return;
     }
 
-    renderGrid(grid, days, pools, bookings);
+    renderGrid(grid, days, pools, bookings, pendingRequests);
   }
 
-  function renderGrid(grid, days, pools, bookings) {
+  function renderGrid(grid, days, pools, bookings, pendingRequests) {
     const n = days.length;
     grid.style.gridTemplateColumns = `140px repeat(${n}, 1fr)`;
 
-    // Build the row list: a pool-header row, then one row per unit in that pool.
+    // Build the row list: a pool-header row, a "Pending Requests" row (still-
+    // unconfirmed bookings for that pool have no unit yet, so they get their
+    // own row instead of a specific kennel), then one row per unit in that pool.
     const rows = [];
     pools.forEach((pool) => {
       if (!pool.units.length) return;
       rows.push({ type: 'pool', name: pool.name });
+      rows.push({ type: 'pending', poolId: pool.id });
       pool.units.forEach((unit) => rows.push({ type: 'unit', id: unit.id, name: unit.name }));
     });
 
     const unitRowIndex = new Map();
-    rows.forEach((row, i) => { if (row.type === 'unit') unitRowIndex.set(row.id, i + 2); }); // +2: header row is 1
+    const pendingRowIndex = new Map();
+    rows.forEach((row, i) => {
+      if (row.type === 'unit') unitRowIndex.set(row.id, i + 2); // +2: header row is 1
+      if (row.type === 'pending') pendingRowIndex.set(row.poolId, i + 2);
+    });
 
     const cells = [];
 
@@ -271,6 +281,11 @@
       const gridRow = i + 2;
       if (row.type === 'pool') {
         cells.push(`<div class="cal-pool-header" style="grid-column:1/-1; grid-row:${gridRow}">${row.name}</div>`);
+      } else if (row.type === 'pending') {
+        cells.push(`<div class="cal-unit-label pending-label" style="grid-column:1; grid-row:${gridRow}">Pending Requests</div>`);
+        for (let c = 0; c < n; c++) {
+          cells.push(`<div class="cal-day-cell" style="grid-column:${c + 2}; grid-row:${gridRow}"></div>`);
+        }
       } else {
         cells.push(`<div class="cal-unit-label" style="grid-column:1; grid-row:${gridRow}">${row.name}</div>`);
         for (let c = 0; c < n; c++) {
@@ -304,6 +319,28 @@
         <div class="cal-booking ${statusClass}" draggable="true" data-booking-id="${b.id}"
              ondragstart="onBookingDragStart(event, '${b.id}')" ondragend="onBookingDragEnd(event)"
              style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType} — drag to move to a different unit">
+          ${dogName}
+        </div>
+      `);
+    });
+
+    // Pending-request bars — not draggable (no unit assigned yet to move from).
+    pendingRequests.forEach((b) => {
+      const gridRow = pendingRowIndex.get(b.capacityPoolId);
+      if (!gridRow) return;
+
+      const bStart = new Date(b.startDate);
+      const bEnd = new Date(b.endDate);
+      const clippedStart = bStart < rangeStart ? rangeStart : bStart;
+      const clippedEnd = bEnd > rangeLast ? rangeLast : bEnd;
+      if (clippedStart > clippedEnd) return;
+
+      const colStart = daysBetween(rangeStart, clippedStart) + 2;
+      const colEnd = daysBetween(rangeStart, clippedEnd) + 3;
+      const dogName = b.dog?.name || 'Unknown dog';
+
+      cells.push(`
+        <div class="cal-booking pending-status" style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType} — requested, not yet confirmed">
           ${dogName}
         </div>
       `);
