@@ -138,8 +138,14 @@ model Booking {
   ghlDogObjectId        String // GHL Custom Object record ID for the dog
   ghlOwnerContactId     String // GHL Contact ID for the owner
   serviceType           ServiceType
-  startDate             DateTime
-  endDate               DateTime
+  startDate             DateTime // As booked — the final bill uses actualStartDate/actualEndDate instead (see lib/quote.js)
+  endDate               DateTime // As booked
+  // Real drop-off/pickup dates, set at Check In / Check Out. The final invoice
+  // is computed from these, not startDate/endDate, so an extended or
+  // early-ended stay is billed for what actually happened, not what was
+  // originally booked. Null until each respective action occurs.
+  actualStartDate       DateTime?
+  actualEndDate         DateTime?
   unitId                String? // Assigned physical unit — null until confirmed
   unit                  Unit?         @relation(fields: [unitId], references: [id])
   // JSON: array of { addOnId, name, price, qty } — snapshot at time of booking

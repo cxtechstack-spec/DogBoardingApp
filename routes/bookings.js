@@ -25,6 +25,14 @@ import {
 
 const router = Router();
 
+// Bookings store pure calendar dates (UTC midnight, no time-of-day meaning) —
+// used to stamp the real check-in/check-out date as "today" in that same
+// convention, so it lines up with startDate/endDate for billing purposes.
+function todayUTC() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
 async function getClient(ghlLocationId) {
   return db.client.findUnique({
     where: { ghlLocationId },
@@ -599,7 +607,7 @@ router.put('/:id/check-in', asyncHandler(async (req, res) => {
 
   const updated = await db.booking.update({
     where: { id: req.params.id },
-    data: { status: 'ACTIVE', vaccineCheckDropoff: JSON.stringify(vaccineCheck) },
+    data: { status: 'ACTIVE', actualStartDate: todayUTC(), vaccineCheckDropoff: JSON.stringify(vaccineCheck) },
   });
 
   res.json({ booking: updated });
@@ -627,7 +635,11 @@ router.put('/:id/check-out', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: `${booking.serviceType} is no longer configured for this client` });
   }
 
-  const stayTotal = computeStayTotalFromBooking(booking, service);
+  // Bill for what actually happened (extended stay, early pickup, etc.), not
+  // what was originally booked — actualStartDate was already set at Check In;
+  // actualEndDate is "today" (real pickup date) instead of the booked endDate.
+  const actualEndDate = todayUTC();
+  const stayTotal = computeStayTotalFromBooking({ ...booking, actualEndDate }, service);
 
   let depositPaid = 0;
   if (booking.ghlInvoiceId) {
@@ -642,7 +654,8 @@ router.put('/:id/check-out', asyncHandler(async (req, res) => {
     const contact = await getContact(booking.ghlOwnerContactId, token);
     if (!contact) return res.status(404).json({ error: 'Owner contact not found' });
 
-    const dateRange = `${booking.startDate.toISOString().slice(0, 10)} to ${booking.endDate.toISOString().slice(0, 10)}`;
+    const actualStart = booking.actualStartDate ?? booking.startDate;
+    const dateRange = `${actualStart.toISOString().slice(0, 10)} to ${actualEndDate.toISOString().slice(0, 10)}`;
     const created = await createAndSendInvoice({
       locationId,
       contact,
@@ -655,7 +668,7 @@ router.put('/:id/check-out', asyncHandler(async (req, res) => {
 
   const updated = await db.booking.update({
     where: { id: req.params.id },
-    data: { status: 'COMPLETED', ghlRemainderInvoiceId: remainderInvoiceId },
+    data: { status: 'COMPLETED', actualEndDate, ghlRemainderInvoiceId: remainderInvoiceId },
   });
 
   res.json({ booking: updated, remainder, remainderInvoiceId });
