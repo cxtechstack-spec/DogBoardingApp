@@ -60,6 +60,17 @@
     .badge.ok { background: #f0fdf4; color: #16a34a; border: 1px solid #86efac; }
     .badge.neutral { background: #f5f5f5; color: #777; border: 1px solid #ddd; }
 
+    .behavioral-alert {
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      color: #991b1b;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
     .detail-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -197,6 +208,14 @@
       : '<span class="badge danger">Deposit unpaid</span>';
   }
 
+  // A full callout, not a small badge — behavioral notes (e.g. a reactive or
+  // aggressive dog) need to actually be readable at a glance, not truncated
+  // into a pill, so staff can decide whether to even accept the booking.
+  function behavioralAlertHtml(dog) {
+    if (!dog?.behavioral) return '';
+    return `<div class="behavioral-alert">⚠️ Behavioral Notes: ${dog.behavioral}</div>`;
+  }
+
   function bookingCardHtml(b, actionsHtml) {
     const addOnsText = b.addOnsSelected.length
       ? b.addOnsSelected.map((a) => `${a.name} x${a.qty}`).join(', ')
@@ -218,6 +237,7 @@
             ${depositBadge(b.deposit)}
           </div>
         </div>
+        ${behavioralAlertHtml(b.dog)}
         <div class="detail-grid">
           <div>
             <span class="field-label">Service</span>
@@ -235,6 +255,12 @@
             <span class="field-label">${b.unit ? 'Assigned Unit' : 'Locked Rate'}</span>
             <span class="field-value">${b.unit?.name || `$${b.lockedRate.toFixed(2)}`}</span>
           </div>
+          ${b.dog?.feeding ? `
+            <div>
+              <span class="field-label">Feeding Instructions</span>
+              <span class="field-value">${b.dog.feeding}</span>
+            </div>
+          ` : ''}
           ${b.status === 'REQUESTED' ? `
             <div>
               <span class="field-label">Requested</span>

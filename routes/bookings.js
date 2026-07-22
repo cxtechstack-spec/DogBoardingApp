@@ -65,6 +65,8 @@ function buildDogFieldMap(client) {
     nameKey: client.dogNameFieldKey,
     breedKey: client.dogBreedFieldKey,
     notesKey: client.dogNotesFieldKey,
+    feedingKey: client.dogFeedingFieldKey,
+    behavioralKey: client.dogBehavioralFieldKey,
     vaccineKeys: JSON.parse(client.dogVaccineFieldKeys || '[]'),
   };
 }

@@ -242,8 +242,8 @@
   <h2>Dog Object Mapping</h2>
   <p style="color:#666; font-size:12px; margin-bottom:12px;">
     Tell us which of your GHL custom object holds dog records, and which fields on it are the name, breed,
-    notes, and vaccine expiration dates. Every business's object is set up differently, so this is pulled
-    live from your own GHL account rather than guessed.
+    notes, feeding instructions, behavioral notes, and vaccine expiration dates. Every business's object is
+    set up differently, so this is pulled live from your own GHL account rather than guessed.
   </p>
   <button class="save-btn" onclick="loadDogObjectTypes()">Load My GHL Objects</button>
   <span class="save-status" id="status-dog-objects-load"></span>
@@ -270,6 +270,16 @@
       <div>
         <label class="field-label">Notes Field</label>
         <select id="dog-field-notes"></select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label class="field-label">Feeding Instructions Field</label>
+        <select id="dog-field-feeding"></select>
+      </div>
+      <div>
+        <label class="field-label">Behavioral / Temperament Notes Field</label>
+        <select id="dog-field-behavioral"></select>
       </div>
     </div>
     <div style="margin-bottom:12px">
@@ -679,9 +689,13 @@
     const nameSelect = document.getElementById('dog-field-name');
     const breedSelect = document.getElementById('dog-field-breed');
     const notesSelect = document.getElementById('dog-field-notes');
+    const feedingSelect = document.getElementById('dog-field-feeding');
+    const behavioralSelect = document.getElementById('dog-field-behavioral');
     nameSelect.innerHTML = options;
     breedSelect.innerHTML = options;
     notesSelect.innerHTML = options;
+    feedingSelect.innerHTML = options;
+    behavioralSelect.innerHTML = options;
 
     const savedVaccineKeys = mapping ? JSON.parse(mapping.dogVaccineFieldKeys || '[]') : [];
     const vaccineContainer = document.getElementById('dog-field-vaccines');
@@ -700,6 +714,8 @@
       nameSelect.value = mapping.dogNameFieldKey || '';
       breedSelect.value = mapping.dogBreedFieldKey || '';
       notesSelect.value = mapping.dogNotesFieldKey || '';
+      feedingSelect.value = mapping.dogFeedingFieldKey || '';
+      behavioralSelect.value = mapping.dogBehavioralFieldKey || '';
     }
   }
 
@@ -709,6 +725,8 @@
     const dogNameFieldKey = document.getElementById('dog-field-name').value;
     const dogBreedFieldKey = document.getElementById('dog-field-breed').value;
     const dogNotesFieldKey = document.getElementById('dog-field-notes').value;
+    const dogFeedingFieldKey = document.getElementById('dog-field-feeding').value;
+    const dogBehavioralFieldKey = document.getElementById('dog-field-behavioral').value;
     const dogVaccineFieldKeys = Array.from(document.querySelectorAll('#dog-field-vaccines .day-chip.active'))
       .map(c => c.dataset.fieldKey);
 
@@ -721,7 +739,10 @@
     const res = await fetch(API('/api/settings/dog-object-mapping'), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dogObjectKey, dogNameFieldKey, dogBreedFieldKey, dogNotesFieldKey, dogVaccineFieldKeys }),
+      body: JSON.stringify({
+        dogObjectKey, dogNameFieldKey, dogBreedFieldKey, dogNotesFieldKey,
+        dogFeedingFieldKey, dogBehavioralFieldKey, dogVaccineFieldKeys,
+      }),
     });
 
     if (!res.ok) {

@@ -10,47 +10,52 @@ datasource db {
 // One record per ConnectXperts client business.
 // ghlLocationId is the key that ties this app to their GHL account.
 model Client {
-  id                   String            @id @default(cuid())
-  ghlLocationId        String            @unique
+  id                    String            @id @default(cuid())
+  ghlLocationId         String            @unique
   // Display name shown on the client-facing booking form (request.html) —
   // there's no reliable way to read this from GHL itself (the Get Location
   // API endpoint is Agency-only and 403s for a sub-account PIT), so the
   // business types it in directly.
-  businessName         String?
+  businessName          String?
   // External GHL Form links the client-facing booking form (request.html)
   // sends dog owners to instead of collecting this itself — this business's
   // own GHL Workflow creates/updates the Dog object (and vaccine records,
   // including uploaded proof) from those form submissions. Null means this
   // gate is off and the booking form falls back to its own simple
   // name/breed/notes fields for a new dog, with no vaccine gate at all.
-  newDogFormUrl        String?
-  vaccineUpdateFormUrl String?
-  services             ServiceSettings[]
-  addOns               AddOn[]
-  capacityPools        CapacityPool[]
-  bookings             Booking[]
+  newDogFormUrl         String?
+  vaccineUpdateFormUrl  String?
+  services              ServiceSettings[]
+  addOns                AddOn[]
+  capacityPools         CapacityPool[]
+  bookings              Booking[]
   // Combined cap on add-on selections per day, across the whole add-on list
   // (not per individual add-on) — e.g. Dock Diving + Agility together can hit this cap.
-  maxAddOnsPerDay      Int               @default(1)
+  maxAddOnsPerDay       Int               @default(1)
   // AES-256-GCM ciphertext (see lib/crypto.js) — this business's own GHL Private
   // Integration Token. Null until they complete the GHL Connection step in Settings.
-  ghlApiTokenEncrypted String?
+  ghlApiTokenEncrypted  String?
   // Who gets texted when a new booking request comes in — a name for display
   // and the phone number itself. Null means no notification is sent.
-  staffNotifyName      String?
-  staffNotifyPhone     String?
+  staffNotifyName       String?
+  staffNotifyPhone      String?
   // Which of this business's own GHL custom objects/fields represent a dog —
   // every business's Dog object has different field keys, so this maps our
   // concepts (name, breed, notes, vaccine dates) to their actual field keys.
-  dogObjectKey         String?
-  dogNameFieldKey      String?
-  dogBreedFieldKey     String?
-  dogNotesFieldKey     String?
+  dogObjectKey          String?
+  dogNameFieldKey       String?
+  dogBreedFieldKey      String?
+  dogNotesFieldKey      String?
+  // Kept distinct from dogNotesFieldKey/each other so behavioral flags (e.g.
+  // reactive/aggressive dogs) can't get buried inside routine feeding text —
+  // staff need to see safety-relevant info at a glance, not read a paragraph.
+  dogFeedingFieldKey    String?
+  dogBehavioralFieldKey String?
   // JSON array of field keys — zero or more vaccine-expiration date fields.
   // "Current" means every listed field has a value and it isn't in the past.
-  dogVaccineFieldKeys  String            @default("[]")
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
+  dogVaccineFieldKeys   String            @default("[]")
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 }
 
 // A named group of physical spaces (e.g. "Kennels", "Crates") that one or more

@@ -108,13 +108,23 @@ router.get('/dog-object-fields', asyncHandler(async (req, res) => {
 
 // PUT /api/settings/dog-object-mapping
 // Saves which object + fields represent a dog for this business. Name is
-// required; breed/notes/vaccine fields are all optional (zero or more vaccine
-// fields — see lib/ghl-contacts.js's vaccineStatusFromRecord for why).
+// required; everything else is optional. Feeding and behavioral notes are
+// kept as separate fields (not folded into general notes) so a behavioral
+// flag (e.g. a reactive/aggressive dog) can't get buried inside routine
+// feeding text — see requests.html's prominent behavioral-notes badge.
 router.put('/dog-object-mapping', asyncHandler(async (req, res) => {
   const locationId = req.query.location_id;
   if (!locationId) return res.status(400).json({ error: 'location_id required' });
 
-  const { dogObjectKey, dogNameFieldKey, dogBreedFieldKey, dogNotesFieldKey, dogVaccineFieldKeys } = req.body;
+  const {
+    dogObjectKey,
+    dogNameFieldKey,
+    dogBreedFieldKey,
+    dogNotesFieldKey,
+    dogFeedingFieldKey,
+    dogBehavioralFieldKey,
+    dogVaccineFieldKeys,
+  } = req.body;
   if (!dogObjectKey || !dogNameFieldKey) {
     return res.status(400).json({ error: 'dogObjectKey and dogNameFieldKey required' });
   }
@@ -127,6 +137,8 @@ router.put('/dog-object-mapping', asyncHandler(async (req, res) => {
       dogNameFieldKey,
       dogBreedFieldKey: dogBreedFieldKey || null,
       dogNotesFieldKey: dogNotesFieldKey || null,
+      dogFeedingFieldKey: dogFeedingFieldKey || null,
+      dogBehavioralFieldKey: dogBehavioralFieldKey || null,
       dogVaccineFieldKeys: JSON.stringify(Array.isArray(dogVaccineFieldKeys) ? dogVaccineFieldKeys : []),
     },
   });
