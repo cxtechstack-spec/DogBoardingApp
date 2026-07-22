@@ -511,6 +511,57 @@ router.put('/:id/confirm', asyncHandler(async (req, res) => {
   res.json({ booking: updated });
 }));
 
+// PUT /api/bookings/:id/reassign-unit
+// Moves an already-confirmed/active booking to a different unit (e.g. dragging
+// a dog to a different kennel/crate on the calendar) without touching its
+// dates. Same pool + overlap validation as /confirm, since a unit is still a
+// hard, single-occupancy resource.
+// Pure DB operation — no GHL call, no token needed.
+router.put('/:id/reassign-unit', asyncHandler(async (req, res) => {
+  const { unitId } = req.body;
+  if (!unitId) return res.status(400).json({ error: 'unitId required' });
+
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+  const client = await getClient(locationId);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+
+  const booking = await db.booking.findUnique({ where: { id: req.params.id } });
+  if (!booking || booking.clientId !== client.id) return res.status(404).json({ error: 'Booking not found' });
+  if (!['CONFIRMED', 'ACTIVE'].includes(booking.status)) {
+    return res.status(400).json({ error: `Cannot reassign a booking with status ${booking.status}` });
+  }
+
+  const service = client.services.find((s) => s.serviceType === booking.serviceType);
+  const unit = await db.unit.findUnique({ where: { id: unitId } });
+  const allowedPoolIds = service
+    ? [service.capacityPoolId, service.capacityPool.fallbackPoolId].filter(Boolean)
+    : [];
+  if (!unit || !service || !allowedPoolIds.includes(unit.capacityPoolId)) {
+    return res.status(400).json({ error: "That unit isn't part of this booking's capacity pool" });
+  }
+
+  const overlapping = await db.booking.findFirst({
+    where: {
+      unitId,
+      status: { in: ['CONFIRMED', 'ACTIVE'] },
+      startDate: { lte: booking.endDate },
+      endDate: { gte: booking.startDate },
+      id: { not: booking.id },
+    },
+  });
+  if (overlapping) {
+    return res.status(409).json({ error: `${unit.name} is already booked for overlapping dates` });
+  }
+
+  const updated = await db.booking.update({
+    where: { id: req.params.id },
+    data: { unitId },
+  });
+
+  res.json({ booking: updated });
+}));
+
 // PUT /api/bookings/:id/deny
 // Denied is terminal — it never moves on to Active or Completed.
 // Pure DB operation — no GHL call, no token needed.

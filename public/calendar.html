@@ -119,9 +119,13 @@
       display: flex;
       align-items: center;
       z-index: 1;
+      cursor: grab;
     }
 
     .cal-booking.active-status { background: #16a34a; }
+    .cal-booking.dragging { opacity: 0.4; }
+
+    .cal-day-cell.drag-over { background: #eef2ff; }
 
     .empty-state { color: #888; font-size: 13px; padding: 16px; }
   </style>
@@ -270,7 +274,10 @@
       } else {
         cells.push(`<div class="cal-unit-label" style="grid-column:1; grid-row:${gridRow}">${row.name}</div>`);
         for (let c = 0; c < n; c++) {
-          cells.push(`<div class="cal-day-cell" style="grid-column:${c + 2}; grid-row:${gridRow}"></div>`);
+          cells.push(`
+            <div class="cal-day-cell" data-unit-id="${row.id}" style="grid-column:${c + 2}; grid-row:${gridRow}"
+                 ondragover="onDayCellDragOver(event)" ondragleave="onDayCellDragLeave(event)" ondrop="onDayCellDrop(event, '${row.id}')"></div>
+          `);
         }
       }
     });
@@ -294,13 +301,59 @@
       const statusClass = b.status === 'ACTIVE' ? 'active-status' : '';
 
       cells.push(`
-        <div class="cal-booking ${statusClass}" style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType}">
+        <div class="cal-booking ${statusClass}" draggable="true" data-booking-id="${b.id}"
+             ondragstart="onBookingDragStart(event, '${b.id}')" ondragend="onBookingDragEnd(event)"
+             style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType} — drag to move to a different unit">
           ${dogName}
         </div>
       `);
     });
 
     grid.innerHTML = cells.join('');
+  }
+
+  // Drag a booking bar onto a different unit row to move that dog to a
+  // different kennel/crate, keeping its dates unchanged — see PUT
+  // /api/bookings/:id/reassign-unit.
+  let draggedBookingId = null;
+
+  function onBookingDragStart(event, bookingId) {
+    draggedBookingId = bookingId;
+    event.target.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+  }
+
+  function onBookingDragEnd(event) {
+    event.target.classList.remove('dragging');
+  }
+
+  function onDayCellDragOver(event) {
+    event.preventDefault();
+    event.currentTarget.classList.add('drag-over');
+  }
+
+  function onDayCellDragLeave(event) {
+    event.currentTarget.classList.remove('drag-over');
+  }
+
+  async function onDayCellDrop(event, unitId) {
+    event.preventDefault();
+    event.currentTarget.classList.remove('drag-over');
+    const bookingId = draggedBookingId;
+    draggedBookingId = null;
+    if (!bookingId) return;
+
+    const res = await fetch(API(`/api/bookings/${bookingId}/reassign-unit`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unitId }),
+    });
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({}));
+      alert(error || 'Could not move this booking.');
+      return;
+    }
+    loadCalendar();
   }
 
   const SERVICE_LABELS = { BOARDING: 'Boarding', DAY_CARE: 'Day Care', DAY_TRAINING: 'Day Training' };
