@@ -389,10 +389,14 @@
       alert(error);
       return;
     }
-    const { remainder } = await res.json();
-    alert(remainder > 0
-      ? `Checked out. A balance invoice for $${remainder.toFixed(2)} has been sent to the client.`
-      : 'Checked out. No balance due.');
+    const { remainder, autoChargeAttempted } = await res.json();
+    if (remainder <= 0) {
+      alert('Checked out. No balance due.');
+    } else if (autoChargeAttempted) {
+      alert(`Checked out. A charge for $${remainder.toFixed(2)} was sent to be processed automatically — check GHL's Transactions to confirm it went through. A balance invoice was also sent as a backup.`);
+    } else {
+      alert(`Checked out. A balance invoice for $${remainder.toFixed(2)} has been sent to the client.`);
+    }
     loadAll();
   }
 

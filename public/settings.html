@@ -218,6 +218,25 @@
   <span class="save-status" id="status-intake-forms"></span>
 </div>
 
+<!-- BALANCE AUTO-CHARGE -->
+<div class="card">
+  <h2>Balance Auto-Charge</h2>
+  <p style="color:#666; font-size:12px; margin-bottom:12px;">
+    Paste your GHL Workflow's webhook URL here (Inbound Webhook trigger → Stripe One-Time Charge action, with
+    Customer ID and Amount both mapped dynamically from the webhook payload). When set, Check Out sends the
+    final balance here to charge it automatically — no card click needed from you or the client. An invoice is
+    still created either way as your own record. Leave blank to just email the balance invoice as before.
+  </p>
+  <div class="field-row full">
+    <div>
+      <label class="field-label">Webhook URL</label>
+      <input type="text" id="balance-auto-charge-url" placeholder="https://services.leadconnectorhq.com/hooks/...">
+    </div>
+  </div>
+  <button class="save-btn" onclick="saveBalanceAutoCharge()">Save</button>
+  <span class="save-status" id="status-balance-auto-charge"></span>
+</div>
+
 <!-- GHL CONNECTION -->
 <div class="card">
   <h2>GHL Connection</h2>
@@ -787,6 +806,21 @@
     setTimeout(() => { status.textContent = ''; }, 3000);
   }
 
+  async function saveBalanceAutoCharge() {
+    const status = document.getElementById('status-balance-auto-charge');
+    const balanceAutoChargeWebhookUrl = document.getElementById('balance-auto-charge-url').value.trim();
+
+    status.textContent = 'Saving…';
+    const res = await fetch(API('/api/settings/balance-auto-charge'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ balanceAutoChargeWebhookUrl }),
+    });
+
+    status.textContent = res.ok ? '✓ Saved' : '✗ Error';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
+
   async function saveNotifications() {
     const status = document.getElementById('status-notifications');
     const staffNotifyName = document.getElementById('staff-notify-name').value.trim();
@@ -811,6 +845,7 @@
     document.getElementById('business-name').value = client.businessName || '';
     document.getElementById('new-dog-form-url').value = client.newDogFormUrl || '';
     document.getElementById('vaccine-update-form-url').value = client.vaccineUpdateFormUrl || '';
+    document.getElementById('balance-auto-charge-url').value = client.balanceAutoChargeWebhookUrl || '';
     document.getElementById('staff-notify-name').value = client.staffNotifyName || '';
     document.getElementById('staff-notify-phone').value = client.staffNotifyPhone || '';
     document.getElementById('max-addons-per-day').value = client.maxAddOnsPerDay;

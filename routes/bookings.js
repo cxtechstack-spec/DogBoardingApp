@@ -9,7 +9,7 @@ import { asyncHandler } from '../lib/async-handler.js';
 import { decrypt } from '../lib/crypto.js';
 import { checkPoolAvailability } from '../lib/availability.js';
 import { computeStayTotalFromBooking, computeDepositFromBooking, countUnits } from '../lib/quote.js';
-import { createAndSendInvoice, getInvoiceStatus } from '../lib/ghl-invoices.js';
+import { createAndSendInvoice, getInvoiceStatus, getStripeCustomerIdForInvoice } from '../lib/ghl-invoices.js';
 import { notifyStaff } from '../lib/ghl-notifications.js';
 import {
   upsertContact,
@@ -77,6 +77,51 @@ function buildDogFieldMap(client) {
     behavioralKey: client.dogBehavioralFieldKey,
     vaccineKeys: JSON.parse(client.dogVaccineFieldKeys || '[]'),
   };
+}
+
+// Captures the Stripe Customer ID behind the (already paid) deposit invoice,
+// so the final balance can be auto-charged at Check Out without the client
+// clicking anything — see lib/ghl-invoices.js's getStripeCustomerIdForInvoice.
+// Best-effort and idempotent: called at both Check In and Check Out (deposit
+// may not be paid yet at Check In), does nothing once already captured, and
+// never throws — a business without balanceAutoChargeWebhookUrl configured
+// doesn't need this at all, and a failure here shouldn't block check-in/out.
+async function ensureStripeCustomerId(booking, locationId, token) {
+  if (booking.stripeCustomerId || !booking.ghlInvoiceId) return booking.stripeCustomerId ?? null;
+  try {
+    const invoiceStatus = await getInvoiceStatus(booking.ghlInvoiceId, locationId, token);
+    if (!invoiceStatus.paid) return null;
+
+    const stripeCustomerId = await getStripeCustomerIdForInvoice(booking.ghlInvoiceId, locationId, token);
+    if (!stripeCustomerId) return null;
+
+    await db.booking.update({ where: { id: booking.id }, data: { stripeCustomerId } });
+    return stripeCustomerId;
+  } catch (err) {
+    console.warn(`ensureStripeCustomerId failed for booking ${booking.id}: ${err.message}`);
+    return null;
+  }
+}
+
+// Fires this business's own GHL Workflow (Inbound Webhook -> Stripe One-Time
+// Charge, both Customer ID and Amount mapped dynamically from this payload)
+// to charge the final balance with no click from staff or the client. This
+// is a plain webhook POST, not a GHL REST call — no bearer token involved.
+// Returns whether GHL *accepted* the request, not whether the charge itself
+// succeeded (see the check-out handler's comment on why that can't be known
+// synchronously).
+async function triggerBalanceAutoCharge({ webhookUrl, stripeCustomerId, amount, description }) {
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stripeCustomerId, amount, description }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn(`Balance auto-charge webhook failed: ${err.message}`);
+    return false;
+  }
 }
 
 // Shared dog/owner/vaccine/unit enrichment — used by both the staff queue and
@@ -605,6 +650,12 @@ router.put('/:id/check-in', asyncHandler(async (req, res) => {
     vaccineCheck = { checked: false, timestamp: new Date().toISOString(), details: null };
   }
 
+  // Best-effort: the deposit may already be paid by check-in time, in which
+  // case this saves needing to try again at check-out.
+  if (client.balanceAutoChargeWebhookUrl) {
+    await ensureStripeCustomerId(booking, locationId, token);
+  }
+
   const updated = await db.booking.update({
     where: { id: req.params.id },
     data: { status: 'ACTIVE', actualStartDate: todayUTC(), vaccineCheckDropoff: JSON.stringify(vaccineCheck) },
@@ -650,20 +701,32 @@ router.put('/:id/check-out', asyncHandler(async (req, res) => {
   const remainder = Math.round((stayTotal - depositPaid) * 100) / 100;
 
   let remainderInvoiceId = null;
+  let autoChargeAttempted = false;
   if (remainder > 0) {
     const contact = await getContact(booking.ghlOwnerContactId, token);
     if (!contact) return res.status(404).json({ error: 'Owner contact not found' });
 
     const actualStart = booking.actualStartDate ?? booking.startDate;
     const dateRange = `${actualStart.toISOString().slice(0, 10)} to ${actualEndDate.toISOString().slice(0, 10)}`;
-    const created = await createAndSendInvoice({
-      locationId,
-      contact,
-      description: `Balance Due — ${SERVICE_LABELS[booking.serviceType] || booking.serviceType} (${dateRange})`,
-      amount: remainder,
-      token,
-    });
+    const description = `Balance Due — ${SERVICE_LABELS[booking.serviceType] || booking.serviceType} (${dateRange})`;
+
+    // The invoice is still created either way — it's the business's own
+    // record of what's owed, and the fallback if auto-charge isn't set up or
+    // doesn't have a usable Stripe customer yet.
+    const created = await createAndSendInvoice({ locationId, contact, description, amount: remainder, token });
     remainderInvoiceId = created.invoiceId;
+
+    if (client.balanceAutoChargeWebhookUrl) {
+      const stripeCustomerId = await ensureStripeCustomerId(booking, locationId, token);
+      if (stripeCustomerId) {
+        autoChargeAttempted = await triggerBalanceAutoCharge({
+          webhookUrl: client.balanceAutoChargeWebhookUrl,
+          stripeCustomerId,
+          amount: remainder,
+          description,
+        });
+      }
+    }
   }
 
   const updated = await db.booking.update({
@@ -671,7 +734,12 @@ router.put('/:id/check-out', asyncHandler(async (req, res) => {
     data: { status: 'COMPLETED', actualEndDate, ghlRemainderInvoiceId: remainderInvoiceId },
   });
 
-  res.json({ booking: updated, remainder, remainderInvoiceId });
+  // autoChargeAttempted only means the charge request was accepted by GHL's
+  // workflow webhook, not that the charge itself succeeded — GHL workflows
+  // run asynchronously, so there's no synchronous success/failure to report
+  // here. Staff should still confirm via GHL's Transactions/Payments that it
+  // actually went through, especially early on.
+  res.json({ booking: updated, remainder, remainderInvoiceId, autoChargeAttempted });
 }));
 
 export default router;
