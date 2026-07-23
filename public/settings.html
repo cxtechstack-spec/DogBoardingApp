@@ -237,6 +237,25 @@
   <span class="save-status" id="status-balance-auto-charge"></span>
 </div>
 
+<!-- DENIAL NOTIFICATION -->
+<div class="card">
+  <h2>Booking Denial Notification</h2>
+  <p style="color:#666; font-size:12px; margin-bottom:12px;">
+    Paste your GHL Workflow's webhook URL here (Inbound Webhook trigger → Find Contact by Contact ID → Send
+    Email + Send SMS, using the dog name / service / dates / denial reason as dynamic values from the webhook
+    payload). When set, denying a request notifies the client through your own workflow — lets you use both
+    channels and track delivery on your end. Leave blank to just send a plain text instead.
+  </p>
+  <div class="field-row full">
+    <div>
+      <label class="field-label">Webhook URL</label>
+      <input type="text" id="denial-notification-url" placeholder="https://services.leadconnectorhq.com/hooks/...">
+    </div>
+  </div>
+  <button class="save-btn" onclick="saveDenialNotification()">Save</button>
+  <span class="save-status" id="status-denial-notification"></span>
+</div>
+
 <!-- GHL CONNECTION -->
 <div class="card">
   <h2>GHL Connection</h2>
@@ -821,6 +840,21 @@
     setTimeout(() => { status.textContent = ''; }, 3000);
   }
 
+  async function saveDenialNotification() {
+    const status = document.getElementById('status-denial-notification');
+    const denialNotificationWebhookUrl = document.getElementById('denial-notification-url').value.trim();
+
+    status.textContent = 'Saving…';
+    const res = await fetch(API('/api/settings/denial-notification'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ denialNotificationWebhookUrl }),
+    });
+
+    status.textContent = res.ok ? '✓ Saved' : '✗ Error';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
+
   async function saveNotifications() {
     const status = document.getElementById('status-notifications');
     const staffNotifyName = document.getElementById('staff-notify-name').value.trim();
@@ -846,6 +880,7 @@
     document.getElementById('new-dog-form-url').value = client.newDogFormUrl || '';
     document.getElementById('vaccine-update-form-url').value = client.vaccineUpdateFormUrl || '';
     document.getElementById('balance-auto-charge-url').value = client.balanceAutoChargeWebhookUrl || '';
+    document.getElementById('denial-notification-url').value = client.denialNotificationWebhookUrl || '';
     document.getElementById('staff-notify-name').value = client.staffNotifyName || '';
     document.getElementById('staff-notify-phone').value = client.staffNotifyPhone || '';
     document.getElementById('max-addons-per-day').value = client.maxAddOnsPerDay;

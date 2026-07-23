@@ -459,6 +459,26 @@ router.put('/balance-auto-charge', asyncHandler(async (req, res) => {
   res.json({ client: { ...updated, ghlConnected: !!ghlApiTokenEncrypted } });
 }));
 
+// PUT /api/settings/denial-notification
+// This business's own GHL Workflow webhook URL (Inbound Webhook -> Find
+// Contact -> Send Email + Send SMS) — Deny POSTs the contact ID, dog name,
+// and denial reason here so the client gets notified with delivery tracking
+// on the business's end. Blank falls back to a plain direct SMS instead.
+router.put('/denial-notification', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const { denialNotificationWebhookUrl } = req.body;
+  const client = await getOrCreateClient(locationId);
+
+  const { ghlApiTokenEncrypted, ...updated } = await db.client.update({
+    where: { id: client.id },
+    data: { denialNotificationWebhookUrl: denialNotificationWebhookUrl || null },
+  });
+
+  res.json({ client: { ...updated, ghlConnected: !!ghlApiTokenEncrypted } });
+}));
+
 // PUT /api/settings/notifications
 // Who gets texted when a new booking request comes in. Both fields optional —
 // clearing the phone turns notifications off for this client.

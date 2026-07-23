@@ -10,7 +10,7 @@ import { decrypt } from '../lib/crypto.js';
 import { checkPoolAvailability } from '../lib/availability.js';
 import { computeStayTotalFromBooking, computeDepositFromBooking, countUnits } from '../lib/quote.js';
 import { createAndSendInvoice, getInvoiceStatus, getStripeCustomerIdForInvoice } from '../lib/ghl-invoices.js';
-import { notifyStaff } from '../lib/ghl-notifications.js';
+import { notifyStaff, notifyContactDirect } from '../lib/ghl-notifications.js';
 import {
   upsertContact,
   findDogsForContact,
@@ -103,23 +103,22 @@ async function ensureStripeCustomerId(booking, locationId, token) {
   }
 }
 
-// Fires this business's own GHL Workflow (Inbound Webhook -> Stripe One-Time
-// Charge, both Customer ID and Amount mapped dynamically from this payload)
-// to charge the final balance with no click from staff or the client. This
-// is a plain webhook POST, not a GHL REST call — no bearer token involved.
-// Returns whether GHL *accepted* the request, not whether the charge itself
-// succeeded (see the check-out handler's comment on why that can't be known
-// synchronously).
-async function triggerBalanceAutoCharge({ webhookUrl, stripeCustomerId, amount, description }) {
+// Fires one of this business's own GHL Workflows (Inbound Webhook trigger —
+// used for both balance auto-charge and booking-denial notifications) with
+// a JSON payload. Plain webhook POST, not a GHL REST call — no bearer token
+// involved. Returns whether GHL *accepted* the request, not whether whatever
+// the workflow does (charge a card, send an email/text) actually succeeded —
+// GHL workflows run asynchronously with no synchronous result to report.
+async function postToWebhook(webhookUrl, payload) {
   try {
     const res = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stripeCustomerId, amount, description }),
+      body: JSON.stringify(payload),
     });
     return res.ok;
   } catch (err) {
-    console.warn(`Balance auto-charge webhook failed: ${err.message}`);
+    console.warn(`Webhook POST to ${webhookUrl} failed: ${err.message}`);
     return false;
   }
 }
@@ -173,6 +172,35 @@ async function notifyBookingRequest({ client, booking, dogFieldMap, vaccineCheck
     message,
     token,
   });
+}
+
+// Best-effort — a failed notification never fails or delays the deny action
+// itself. If this business has set up their own GHL Workflow for it (Inbound
+// Webhook -> Find Contact -> Send Email + Send SMS), that's used instead of
+// the plain single-channel SMS fallback, since a business can track delivery
+// there and isn't limited to one channel that might silently not reach someone.
+async function notifyClientOfDenial({ client, booking, locationId, token }) {
+  const dogFieldMap = buildDogFieldMap(client);
+  const dogRecord = dogFieldMap.objectKey
+    ? await getDogRecord(booking.ghlDogObjectId, dogFieldMap.objectKey, token).catch(() => null)
+    : null;
+  const dogName = dogRecord ? dogSummaryFromRecord(dogRecord, dogFieldMap).name : 'your dog';
+  const dateRange = `${booking.startDate.toISOString().slice(0, 10)} to ${booking.endDate.toISOString().slice(0, 10)}`;
+
+  if (client.denialNotificationWebhookUrl) {
+    await postToWebhook(client.denialNotificationWebhookUrl, {
+      contactId: booking.ghlOwnerContactId,
+      dogName,
+      serviceType: SERVICE_LABELS[booking.serviceType] || booking.serviceType,
+      dateRange,
+      denialReason: booking.denialReason || '',
+    });
+    return;
+  }
+
+  const reasonText = booking.denialReason ? ` Reason: ${booking.denialReason}` : '';
+  const message = `Your booking request for ${dogName} (${SERVICE_LABELS[booking.serviceType] || booking.serviceType}, ${dateRange}) could not be accepted.${reasonText}`;
+  await notifyContactDirect({ contactId: booking.ghlOwnerContactId, message, token });
 }
 
 // Shared validation for both invoice creation and booking creation — availability
@@ -601,8 +629,8 @@ router.put('/:id/reassign-unit', asyncHandler(async (req, res) => {
 }));
 
 // PUT /api/bookings/:id/deny
-// Denied is terminal — it never moves on to Active or Completed.
-// Pure DB operation — no GHL call, no token needed.
+// Denied is terminal — it never moves on to Active or Completed. Notifies the
+// client of the denial (and reason, if given) — see notifyClientOfDenial.
 router.put('/:id/deny', asyncHandler(async (req, res) => {
   const { denialReason } = req.body;
 
@@ -623,6 +651,17 @@ router.put('/:id/deny', asyncHandler(async (req, res) => {
   });
 
   res.json({ booking: updated });
+
+  // Fire-and-forget — staff should get their response fast regardless of
+  // notification delivery, same pattern as the new-booking staff SMS.
+  try {
+    const token = requireGhlToken(client);
+    notifyClientOfDenial({ client, booking: updated, locationId, token }).catch((err) => {
+      console.warn(`Denial notification failed: ${err.message}`);
+    });
+  } catch (err) {
+    console.warn(`Denial notification skipped: ${err.message}`);
+  }
 }));
 
 // PUT /api/bookings/:id/check-in
@@ -719,8 +758,7 @@ router.put('/:id/check-out', asyncHandler(async (req, res) => {
     if (client.balanceAutoChargeWebhookUrl) {
       const stripeCustomerId = await ensureStripeCustomerId(booking, locationId, token);
       if (stripeCustomerId) {
-        autoChargeAttempted = await triggerBalanceAutoCharge({
-          webhookUrl: client.balanceAutoChargeWebhookUrl,
+        autoChargeAttempted = await postToWebhook(client.balanceAutoChargeWebhookUrl, {
           stripeCustomerId,
           amount: remainder,
           description,
