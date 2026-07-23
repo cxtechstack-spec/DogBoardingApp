@@ -214,6 +214,15 @@
     </div>
     <p class="error-text" id="vaccine-update-status" style="display:none; margin-top:8px;"></p>
   </div>
+  <div id="care-info-section" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid #f0f0f0;">
+    <p class="hint-text" style="margin-bottom:12px;" id="care-info-heading"></p>
+    <div id="care-info-fields"></div>
+    <div class="btn-row">
+      <span></span>
+      <button class="btn-link" onclick="saveCareInfo()">Save Updates</button>
+    </div>
+    <p class="error-text" id="care-info-status" style="display:none; margin-top:4px;"></p>
+  </div>
   <p class="error-text" id="dog-error" style="display:none"></p>
   <div class="btn-row">
     <button class="btn-link" onclick="showStep('owner')">Back</button>
@@ -407,6 +416,7 @@
     newDogFields.style.display = 'none';
     document.getElementById('dog-form-gate').style.display = 'none';
     document.getElementById('vaccine-update-gate').style.display = 'none';
+    document.getElementById('care-info-section').style.display = 'none';
 
     if (!availableDogs.length) {
       selectDog('__new__');
@@ -425,6 +435,68 @@
     document.getElementById('new-dog-fields').style.display = useInlineNewDogFields ? 'block' : 'none';
     document.getElementById('dog-form-gate').style.display = 'none';
     document.getElementById('vaccine-update-gate').style.display = 'none';
+    renderCareInfoSection(dogId);
+  }
+
+  // Optional, non-blocking: an existing dog's feeding/meds/behavioral notes
+  // are only ever captured at intake (the new-dog form), so this is the only
+  // chance to keep them current if something's changed — unlike vaccines,
+  // there's no compliance reason to require it, so it never gates Continue.
+  // Saves directly to that one dog's record (see PUT
+  // /api/bookings/dogs/:id/care-info) for the same reason vaccines do: this
+  // business's GHL Workflow can't safely target a single dog on its own.
+  function renderCareInfoSection(dogId) {
+    const section = document.getElementById('care-info-section');
+    if (dogId === '__new__') {
+      section.style.display = 'none';
+      return;
+    }
+
+    const dog = state.dogs.find((d) => d.id === dogId);
+    const fieldDefs = [
+      { key: 'feeding', label: 'Feeding Instructions', mapped: !!state.client.dogFeedingFieldKey },
+      { key: 'meds', label: 'Medications', mapped: !!state.client.dogMedsFieldKey },
+      { key: 'behavioral', label: 'Behavioral Notes', mapped: !!state.client.dogBehavioralFieldKey },
+    ].filter((f) => f.mapped);
+
+    if (!dog || !fieldDefs.length) {
+      section.style.display = 'none';
+      return;
+    }
+
+    document.getElementById('care-info-status').style.display = 'none';
+    document.getElementById('care-info-heading').textContent =
+      `Has anything changed with ${dog.name ?? 'this dog'}'s feeding, medications, or behavior since your last visit? Update below if so.`;
+    document.getElementById('care-info-fields').innerHTML = fieldDefs.map((f) => `
+      <div class="field-row full">
+        <div>
+          <label class="field-label">${f.label}</label>
+          <textarea class="care-info-input" data-field="${f.key}">${dog[f.key] ?? ''}</textarea>
+        </div>
+      </div>
+    `).join('');
+    section.dataset.dogId = dogId;
+    section.style.display = 'block';
+  }
+
+  async function saveCareInfo() {
+    const section = document.getElementById('care-info-section');
+    const statusEl = document.getElementById('care-info-status');
+    statusEl.style.display = 'none';
+
+    const body = {};
+    document.querySelectorAll('.care-info-input').forEach((el) => {
+      body[el.dataset.field] = el.value.trim();
+    });
+
+    const res = await fetch(API(`/api/bookings/dogs/${section.dataset.dogId}/care-info`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    statusEl.textContent = res.ok ? '✓ Saved' : "Couldn't save those updates — please try again.";
+    statusEl.style.display = 'block';
   }
 
   // Points a new dog's owner at this business's own GHL Form (which their

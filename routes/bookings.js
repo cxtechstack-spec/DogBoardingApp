@@ -15,7 +15,7 @@ import {
   upsertContact,
   findDogsForContact,
   createDogRecord,
-  updateDogVaccineFields,
+  updateDogFields,
   getDogRecord,
   getContact,
   getVaccineStatus,
@@ -339,11 +339,49 @@ router.put('/dogs/:id/vaccines', asyncHandler(async (req, res) => {
     }
   }
 
-  const dog = await updateDogVaccineFields({
+  const dog = await updateDogFields({
     dogObjectId: req.params.id,
     objectKey: dogFieldMap.objectKey,
     locationId,
-    vaccineDates,
+    fields: vaccineDates,
+    token,
+  });
+
+  res.json({ dog });
+}));
+
+// PUT /api/bookings/dogs/:id/care-info?location_id=
+// Updates a dog's feeding/medications/behavioral notes directly by record ID
+// — same reasoning as /vaccines above: this business's GHL Workflow can't
+// safely target a single dog among several on the same contact, so this
+// bypasses it entirely rather than risk overwriting every dog on file.
+// Optional at booking time — unlike vaccines, there's no compliance reason to
+// require it, just a chance to keep it current if something's changed.
+router.put('/dogs/:id/care-info', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const { feeding, meds, behavioral } = req.body;
+
+  const client = await getClient(locationId);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const token = requireGhlToken(client);
+  const dogFieldMap = requireDogMapping(client);
+
+  const fields = {};
+  if (feeding !== undefined && dogFieldMap.feedingKey) fields[dogFieldMap.feedingKey] = feeding;
+  if (meds !== undefined && dogFieldMap.medsKey) fields[dogFieldMap.medsKey] = meds;
+  if (behavioral !== undefined && dogFieldMap.behavioralKey) fields[dogFieldMap.behavioralKey] = behavioral;
+
+  if (Object.keys(fields).length === 0) {
+    return res.status(400).json({ error: 'Nothing to update — no care info fields are mapped for this business' });
+  }
+
+  const dog = await updateDogFields({
+    dogObjectId: req.params.id,
+    objectKey: dogFieldMap.objectKey,
+    locationId,
+    fields,
     token,
   });
 
