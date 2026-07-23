@@ -75,6 +75,7 @@ function buildDogFieldMap(client) {
     notesKey: client.dogNotesFieldKey,
     feedingKey: client.dogFeedingFieldKey,
     behavioralKey: client.dogBehavioralFieldKey,
+    medsKey: client.dogMedsFieldKey,
     vaccineKeys: JSON.parse(client.dogVaccineFieldKeys || '[]'),
   };
 }
@@ -502,6 +503,26 @@ router.get('/calendar', asyncHandler(async (req, res) => {
       units: p.units.map((u) => ({ id: u.id, name: u.name })),
     })),
   });
+}));
+
+// GET /api/bookings/:id?location_id=
+// Single booking, fully enriched — used by the printable kennel card
+// (kennel-card.html) so staff can post a dog's notes/feeding/meds/behavioral
+// info right on their kennel/crate, same idea as Gingr's printable cards.
+router.get('/:id', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const client = await getClient(locationId);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const token = requireGhlToken(client);
+  const dogFieldMap = buildDogFieldMap(client);
+
+  const booking = await db.booking.findUnique({ where: { id: req.params.id } });
+  if (!booking || booking.clientId !== client.id) return res.status(404).json({ error: 'Booking not found' });
+
+  const enriched = await enrichBooking(booking, dogFieldMap, locationId, token);
+  res.json({ booking: enriched });
 }));
 
 // PUT /api/bookings/:id/confirm

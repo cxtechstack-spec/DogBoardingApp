@@ -63,6 +63,7 @@ model Client {
   // staff need to see safety-relevant info at a glance, not read a paragraph.
   dogFeedingFieldKey           String?
   dogBehavioralFieldKey        String?
+  dogMedsFieldKey              String?
   // JSON array of field keys — zero or more vaccine-expiration date fields.
   // "Current" means every listed field has a value and it isn't in the past.
   dogVaccineFieldKeys          String            @default("[]")

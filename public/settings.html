@@ -320,6 +320,12 @@
         <select id="dog-field-behavioral"></select>
       </div>
     </div>
+    <div class="field-row full">
+      <div>
+        <label class="field-label">Medications Field</label>
+        <select id="dog-field-meds"></select>
+      </div>
+    </div>
     <div style="margin-bottom:12px">
       <label class="field-label" style="margin-bottom:8px">Vaccine Expiration Fields (any number)</label>
       <div id="dog-field-vaccines" class="days-grid"></div>
@@ -729,11 +735,13 @@
     const notesSelect = document.getElementById('dog-field-notes');
     const feedingSelect = document.getElementById('dog-field-feeding');
     const behavioralSelect = document.getElementById('dog-field-behavioral');
+    const medsSelect = document.getElementById('dog-field-meds');
     nameSelect.innerHTML = options;
     breedSelect.innerHTML = options;
     notesSelect.innerHTML = options;
     feedingSelect.innerHTML = options;
     behavioralSelect.innerHTML = options;
+    medsSelect.innerHTML = options;
 
     const savedVaccineKeys = mapping ? JSON.parse(mapping.dogVaccineFieldKeys || '[]') : [];
     const vaccineContainer = document.getElementById('dog-field-vaccines');
@@ -754,6 +762,7 @@
       notesSelect.value = mapping.dogNotesFieldKey || '';
       feedingSelect.value = mapping.dogFeedingFieldKey || '';
       behavioralSelect.value = mapping.dogBehavioralFieldKey || '';
+      medsSelect.value = mapping.dogMedsFieldKey || '';
     }
   }
 
@@ -765,6 +774,7 @@
     const dogNotesFieldKey = document.getElementById('dog-field-notes').value;
     const dogFeedingFieldKey = document.getElementById('dog-field-feeding').value;
     const dogBehavioralFieldKey = document.getElementById('dog-field-behavioral').value;
+    const dogMedsFieldKey = document.getElementById('dog-field-meds').value;
     const dogVaccineFieldKeys = Array.from(document.querySelectorAll('#dog-field-vaccines .day-chip.active'))
       .map(c => c.dataset.fieldKey);
 
@@ -779,7 +789,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         dogObjectKey, dogNameFieldKey, dogBreedFieldKey, dogNotesFieldKey,
-        dogFeedingFieldKey, dogBehavioralFieldKey, dogVaccineFieldKeys,
+        dogFeedingFieldKey, dogBehavioralFieldKey, dogMedsFieldKey, dogVaccineFieldKeys,
       }),
     });
 

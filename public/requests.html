@@ -101,6 +101,7 @@
     .actions.single {
       display: flex;
       justify-content: flex-end;
+      gap: 8px;
     }
 
     .action-group { display: flex; gap: 8px; align-items: center; }
@@ -293,9 +294,14 @@
     `;
   }
 
+  function kennelCardUrl(bookingId) {
+    return `kennel-card.html?location_id=${encodeURIComponent(locationId)}&bookingId=${encodeURIComponent(bookingId)}`;
+  }
+
   function confirmedActionsHtml(b) {
     return `
       <div class="actions single">
+        <a href="${kennelCardUrl(b.id)}" target="_blank" style="text-decoration:none; display:inline-flex; align-items:center; padding:8px 14px; border:1px solid #d0d0d0; border-radius:6px; font-size:13px; font-weight:500; color:#444; background:#fff;">Print Kennel Card</a>
         <button class="confirm-btn" onclick="checkInBooking('${b.id}')">Check In</button>
       </div>
     `;
@@ -304,6 +310,7 @@
   function activeActionsHtml(b) {
     return `
       <div class="actions single">
+        <a href="${kennelCardUrl(b.id)}" target="_blank" style="text-decoration:none; display:inline-flex; align-items:center; padding:8px 14px; border:1px solid #d0d0d0; border-radius:6px; font-size:13px; font-weight:500; color:#444; background:#fff;">Print Kennel Card</a>
         <button class="confirm-btn" onclick="checkOutBooking('${b.id}')">Check Out</button>
       </div>
     `;

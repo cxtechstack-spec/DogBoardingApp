@@ -123,6 +123,7 @@ router.put('/dog-object-mapping', asyncHandler(async (req, res) => {
     dogNotesFieldKey,
     dogFeedingFieldKey,
     dogBehavioralFieldKey,
+    dogMedsFieldKey,
     dogVaccineFieldKeys,
   } = req.body;
   if (!dogObjectKey || !dogNameFieldKey) {
@@ -139,6 +140,7 @@ router.put('/dog-object-mapping', asyncHandler(async (req, res) => {
       dogNotesFieldKey: dogNotesFieldKey || null,
       dogFeedingFieldKey: dogFeedingFieldKey || null,
       dogBehavioralFieldKey: dogBehavioralFieldKey || null,
+      dogMedsFieldKey: dogMedsFieldKey || null,
       dogVaccineFieldKeys: JSON.stringify(Array.isArray(dogVaccineFieldKeys) ? dogVaccineFieldKeys : []),
     },
   });
