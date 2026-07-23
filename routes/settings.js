@@ -327,6 +327,24 @@ router.post('/units', asyncHandler(async (req, res) => {
   res.status(201).json({ unit });
 }));
 
+// PUT /api/settings/units/:id
+// Renames an existing unit — e.g. relabeling "Kennel 1" without having to
+// remove and re-add it (which would orphan any bookings already linked to it).
+router.put('/units/:id', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+
+  const client = await getOrCreateClient(locationId);
+  const unit = await db.unit.findUnique({ where: { id: req.params.id }, include: { capacityPool: true } });
+  if (!unit || unit.capacityPool.clientId !== client.id) return res.status(404).json({ error: 'Unit not found' });
+
+  const updated = await db.unit.update({ where: { id: req.params.id }, data: { name } });
+  res.json({ unit: updated });
+}));
+
 // DELETE /api/settings/units/:id
 // Fails if any booking is still linked to this unit (foreign key restriction).
 router.delete('/units/:id', asyncHandler(async (req, res) => {

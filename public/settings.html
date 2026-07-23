@@ -961,8 +961,8 @@
     setTimeout(() => { status.textContent = ''; }, 3000);
   }
 
-  // Kept so updateCapacityFallback() can look up a pool's current name/totalCapacity
-  // without a round-trip — the fallback dropdown only ever changes fallbackPoolId.
+  // Kept so updateCapacityField() can look up a pool's other current fields
+  // without a round-trip when only one field on the row actually changed.
   let currentCapacities = [];
 
   function renderCapacities(capacities) {
@@ -974,9 +974,9 @@
     }
     list.innerHTML = capacities.map(c => `
       <div class="addon-row">
-        <span>${c.name}</span>
-        <span class="addon-meta">${c.totalCapacity} total</span>
-        <select onchange="updateCapacityFallback('${c.id}', this.value)" style="font-size:12px; max-width:220px;">
+        <input type="text" value="${c.name}" style="flex:1; font-size:13px;" onchange="updateCapacityField('${c.id}', 'name', this.value)">
+        <input type="number" min="1" value="${c.totalCapacity}" style="width:80px; font-size:13px;" onchange="updateCapacityField('${c.id}', 'totalCapacity', this.value)">
+        <select onchange="updateCapacityField('${c.id}', 'fallbackPoolId', this.value)" style="font-size:12px; max-width:220px;">
           <option value="">No fallback</option>
           ${capacities.filter(o => o.id !== c.id).map(o => `<option value="${o.id}" ${c.fallbackPoolId === o.id ? 'selected' : ''}>Fallback: ${o.name}</option>`).join('')}
         </select>
@@ -985,14 +985,24 @@
     `).join('');
   }
 
-  async function updateCapacityFallback(id, fallbackPoolId) {
+  // Shared by the name/total-capacity inputs and the fallback dropdown — each
+  // saves immediately on change (no separate Edit/Save mode), merging into
+  // whatever this pool's other fields already are so a change to one field
+  // doesn't clobber the others.
+  async function updateCapacityField(id, field, value) {
     const capacity = currentCapacities.find(c => c.id === id);
     if (!capacity) return;
+
+    const body = {
+      name: field === 'name' ? value : capacity.name,
+      totalCapacity: field === 'totalCapacity' ? value : capacity.totalCapacity,
+      fallbackPoolId: (field === 'fallbackPoolId' ? value : capacity.fallbackPoolId) || null,
+    };
 
     await fetch(API(`/api/settings/pools/${id}`), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: capacity.name, totalCapacity: capacity.totalCapacity, fallbackPoolId: fallbackPoolId || null }),
+      body: JSON.stringify(body),
     });
 
     const res = await fetch(API('/api/settings'));
@@ -1054,11 +1064,23 @@
     }
     list.innerHTML = units.map(u => `
       <div class="addon-row">
-        <span>${u.name}</span>
+        <input type="text" value="${u.name}" style="flex:1; font-size:13px;" onchange="updateUnitName('${u.id}', this.value)">
         <span class="addon-meta">${u.poolName}</span>
         <button class="icon-btn danger" onclick="deleteUnit('${u.id}')">Remove</button>
       </div>
     `).join('');
+  }
+
+  async function updateUnitName(id, name) {
+    await fetch(API(`/api/settings/units/${id}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+
+    const res = await fetch(API('/api/settings'));
+    const { client } = await res.json();
+    renderUnits(client.capacityPools);
   }
 
   function populateUnitPoolDropdown(pools) {
