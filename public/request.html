@@ -269,6 +269,11 @@
 
   <p class="hint-text" id="deposit-note" style="display:none; margin-top:8px;"></p>
 
+  <div class="btn-row" style="margin-bottom:4px;">
+    <span></span>
+    <button class="btn-link" onclick="addAnotherDog()">+ Add Another Dog</button>
+  </div>
+
   <p class="error-text" id="submit-error" style="display:none"></p>
   <div class="btn-row">
     <button class="btn-link" onclick="showStep('addons')">Back</button>
@@ -298,12 +303,17 @@
     skipNewDogForm: false,
     activeGateType: null,
     ghlDogObjectId: null,
+    selectedDogName: null,
     serviceType: null,
     service: null,
     startDate: null,
     endDate: null,
     selectedAddOns: {}, // addOnId -> qty
     quote: null,
+    // Dogs already fully configured (service/dates/add-ons) in this same
+    // sitting, waiting to be submitted alongside whichever dog is currently
+    // in progress — see addAnotherDog()/goToReview()/submitBooking().
+    cart: [],
   };
 
   function showStep(name) {
@@ -373,7 +383,12 @@
     const newDogFields = document.getElementById('new-dog-fields');
     state.selectedDogId = null;
 
-    const dogCards = state.dogs.map((dog) => `
+    // Dogs already added in this same sitting (see addAnotherDog()) are
+    // hidden here so the same dog can't accidentally get booked twice.
+    const cartDogIds = new Set(state.cart.map((c) => c.ghlDogObjectId));
+    const availableDogs = state.dogs.filter((dog) => !cartDogIds.has(dog.id));
+
+    const dogCards = availableDogs.map((dog) => `
       <div class="option-card" data-dog-id="${dog.id}" onclick="selectDog('${dog.id}')">
         <div>
           <div class="option-title">${dog.name ?? 'Unnamed dog'}</div>
@@ -393,7 +408,7 @@
     document.getElementById('dog-form-gate').style.display = 'none';
     document.getElementById('vaccine-update-gate').style.display = 'none';
 
-    if (!state.dogs.length) {
+    if (!availableDogs.length) {
       selectDog('__new__');
     }
   }
@@ -441,6 +456,7 @@
     } else {
       document.getElementById('vaccine-update-gate').style.display = 'none';
       state.ghlDogObjectId = state.selectedDogId;
+      state.selectedDogName = state.dogs.find((d) => d.id === state.selectedDogId)?.name ?? 'Dog';
       renderServiceOptions();
       showStep('service');
     }
@@ -536,6 +552,7 @@
     }
 
     state.ghlDogObjectId = dogId;
+    state.selectedDogName = state.dogs.find((d) => d.id === dogId)?.name ?? 'Dog';
     gate.style.display = 'none';
     renderServiceOptions();
     showStep('service');
@@ -607,6 +624,7 @@
       }
       const { dog } = await res.json();
       state.ghlDogObjectId = dog.id;
+      state.selectedDogName = name;
     } else {
       const dog = state.dogs.find((d) => d.id === state.selectedDogId);
       const needsVaccineUpdate = dog?.vaccine?.tracked && (dog.vaccine.missing || !dog.vaccine.current);
@@ -615,6 +633,7 @@
         return;
       }
       state.ghlDogObjectId = state.selectedDogId;
+      state.selectedDogName = dog?.name ?? 'Dog';
     }
 
     renderServiceOptions();
@@ -745,58 +764,129 @@
     return { units, serviceCost, addOnLines, addOnCost, subtotal, deposit };
   }
 
+  // One dog's line-item block within the (possibly multi-dog) review summary.
+  function dogSummaryHtml(entry) {
+    const unitLabel = entry.service.billingUnit === 'NIGHT' ? 'night' : 'day';
+    return `
+      <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid #f0f0f0;">
+        <div style="font-weight:600; margin-bottom:6px;">${entry.dogName} — ${SERVICE_LABELS[entry.serviceType] || entry.serviceType}</div>
+        <div class="summary-row"><span>${entry.quote.units} ${unitLabel}${entry.quote.units > 1 ? 's' : ''} @ $${entry.service.baseRate.toFixed(2)}</span><span>$${entry.quote.serviceCost.toFixed(2)}</span></div>
+        ${entry.quote.addOnLines.map((l) => `<div class="summary-row"><span>${l.name} x${l.qty}</span><span>$${l.lineTotal.toFixed(2)}</span></div>`).join('')}
+        <div class="summary-row"><span>Subtotal</span><span>$${entry.quote.subtotal.toFixed(2)}</span></div>
+      </div>
+    `;
+  }
+
   function goToReview() {
     const quote = computeQuote();
     state.quote = quote;
 
+    const allEntries = [
+      ...state.cart,
+      { dogName: state.selectedDogName, serviceType: state.serviceType, service: state.service, quote },
+    ];
+    const grandSubtotal = allEntries.reduce((sum, e) => sum + e.quote.subtotal, 0);
+    const grandDeposit = allEntries.reduce((sum, e) => sum + e.quote.deposit, 0);
+    const multiple = allEntries.length > 1;
+
     const summary = document.getElementById('review-summary');
-    summary.innerHTML = `
-      <div class="summary-row"><span>${SERVICE_LABELS[state.serviceType]} (${quote.units} ${state.service.billingUnit.toLowerCase()}${quote.units > 1 ? 's' : ''})</span><span>$${quote.serviceCost.toFixed(2)}</span></div>
-      ${quote.addOnLines.map((l) => `<div class="summary-row"><span>${l.name} x${l.qty}</span><span>$${l.lineTotal.toFixed(2)}</span></div>`).join('')}
-      <div class="summary-row total"><span>Estimated Total</span><span>$${quote.subtotal.toFixed(2)}</span></div>
-    `;
+    summary.innerHTML = allEntries.map(dogSummaryHtml).join('') +
+      `<div class="summary-row total"><span>Estimated ${multiple ? 'Grand ' : ''}Total</span><span>$${grandSubtotal.toFixed(2)}</span></div>`;
 
     // No payment is collected here — the deposit invoice is only sent once
     // the business approves this request (see PUT /:id/confirm), so nothing
     // is ever charged for a request that ends up denied.
     const depositNote = document.getElementById('deposit-note');
-    if (quote.deposit > 0) {
-      depositNote.textContent = `A deposit of $${quote.deposit.toFixed(2)} will be due once your request is approved — you'll get a payment link by email at that time.`;
+    if (grandDeposit > 0) {
+      depositNote.textContent = multiple
+        ? `A total deposit of $${grandDeposit.toFixed(2)} will be due once your requests are approved — you'll get payment links by email at that time.`
+        : `A deposit of $${grandDeposit.toFixed(2)} will be due once your request is approved — you'll get a payment link by email at that time.`;
       depositNote.style.display = 'block';
     } else {
       depositNote.style.display = 'none';
     }
 
+    document.getElementById('submit-btn').textContent = multiple ? 'Submit Requests' : 'Submit Request';
+
     showStep('review');
+  }
+
+  // Stashes the just-configured dog and loops back to the dog picker (same
+  // owner/contact, no need to look them up again) so a household with
+  // multiple dogs boarding together doesn't have to restart the whole flow
+  // per dog — see renderDogOptions()/submitBooking() for the other end of this.
+  function addAnotherDog() {
+    const quote = computeQuote();
+    state.cart.push({
+      dogName: state.selectedDogName,
+      ghlDogObjectId: state.ghlDogObjectId,
+      serviceType: state.serviceType,
+      service: state.service,
+      startDate: state.startDate,
+      endDate: state.endDate,
+      selectedAddOns: { ...state.selectedAddOns },
+      quote,
+    });
+
+    state.ghlDogObjectId = null;
+    state.selectedDogName = null;
+    state.serviceType = null;
+    state.service = null;
+    state.startDate = null;
+    state.endDate = null;
+    state.selectedAddOns = {};
+    state.quote = null;
+
+    renderDogOptions();
+    showStep('dog');
   }
 
   async function submitBooking() {
     const errorEl = document.getElementById('submit-error');
     errorEl.style.display = 'none';
 
-    const res = await fetch(API('/api/bookings'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        serviceType: state.serviceType,
-        startDate: state.startDate,
-        endDate: state.endDate,
-        addOnsSelected: Object.entries(state.selectedAddOns).map(([addOnId, qty]) => ({ addOnId, qty })),
-        ghlDogObjectId: state.ghlDogObjectId,
-        ghlOwnerContactId: state.contact.id,
-      }),
-    });
+    const currentEntry = {
+      dogName: state.selectedDogName,
+      ghlDogObjectId: state.ghlDogObjectId,
+      serviceType: state.serviceType,
+      startDate: state.startDate,
+      endDate: state.endDate,
+      selectedAddOns: state.selectedAddOns,
+      quote: state.quote,
+    };
+    const allEntries = [...state.cart, currentEntry];
+    const multiple = allEntries.length > 1;
 
-    if (!res.ok) {
-      const { error } = await res.json();
-      errorEl.textContent = error;
-      errorEl.style.display = 'block';
-      return;
+    let submittedCount = 0;
+    for (const entry of allEntries) {
+      const res = await fetch(API('/api/bookings'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serviceType: entry.serviceType,
+          startDate: entry.startDate,
+          endDate: entry.endDate,
+          addOnsSelected: Object.entries(entry.selectedAddOns).map(([addOnId, qty]) => ({ addOnId, qty })),
+          ghlDogObjectId: entry.ghlDogObjectId,
+          ghlOwnerContactId: state.contact.id,
+        }),
+      });
+
+      if (!res.ok) {
+        const { error } = await res.json();
+        errorEl.textContent = submittedCount > 0
+          ? `${submittedCount} of ${allEntries.length} requests were submitted, but ${entry.dogName} failed: ${error}. Please contact the business to confirm what went through.`
+          : `${entry.dogName}: ${error}`;
+        errorEl.style.display = 'block';
+        return;
+      }
+      submittedCount++;
     }
 
-    document.getElementById('done-message').textContent = state.quote.deposit > 0
-      ? "Thanks! Your request has been sent to the business for review. If approved, you'll get an email with a deposit payment link."
-      : "Thanks! Your request has been sent to the business for review. You'll hear back once it's confirmed.";
+    const grandDeposit = allEntries.reduce((sum, e) => sum + e.quote.deposit, 0);
+    document.getElementById('done-message').textContent = grandDeposit > 0
+      ? `Thanks! Your request${multiple ? 's have' : ' has'} been sent to the business for review. If approved, you'll get an email with a deposit payment link.`
+      : `Thanks! Your request${multiple ? 's have' : ' has'} been sent to the business for review. You'll hear back once ${multiple ? "they're" : "it's"} confirmed.`;
     showStep('done');
   }
 
