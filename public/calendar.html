@@ -123,7 +123,7 @@
     }
 
     .cal-booking.active-status { background: #16a34a; }
-    .cal-booking.pending-status { background: #f59e0b; cursor: default; }
+    .cal-booking.pending-status { background: #f59e0b; cursor: pointer; }
     .cal-booking.dragging { opacity: 0.4; }
 
     .cal-unit-label.pending-label { color: #b45309; font-style: italic; }
@@ -222,6 +222,29 @@
     return Math.round((b.getTime() - a.getTime()) / DAY_MS);
   }
 
+  // Greedy interval-stacking: sorts by start date and gives each booking the
+  // first lane whose last-placed booking already ended before this one
+  // starts, opening a new lane otherwise — standard calendar-overlap layout,
+  // so overlapping requests for the same pool render on separate rows.
+  function assignLanes(bookingsForPool) {
+    const sorted = [...bookingsForPool].sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+    const laneEndDates = [];
+    const laneAssignment = new Map();
+    sorted.forEach((b) => {
+      const bStart = new Date(b.startDate);
+      const bEnd = new Date(b.endDate);
+      let lane = laneEndDates.findIndex((endDate) => endDate < bStart);
+      if (lane === -1) {
+        lane = laneEndDates.length;
+        laneEndDates.push(bEnd);
+      } else {
+        laneEndDates[lane] = bEnd;
+      }
+      laneAssignment.set(b.id, lane);
+    });
+    return { laneAssignment, laneCount: laneEndDates.length };
+  }
+
   async function loadCalendar() {
     document.getElementById('range-label').textContent = formatRangeLabel();
 
@@ -253,11 +276,26 @@
     // Build the row list: a pool-header row, a "Pending Requests" row (still-
     // unconfirmed bookings for that pool have no unit yet, so they get their
     // own row instead of a specific kennel), then one row per unit in that pool.
+    // Overlapping pending requests for the same pool get their own "lane"
+    // (sub-row) instead of sharing one row — otherwise they'd draw directly on
+    // top of each other and look like a single, wrongly-long booking instead
+    // of several separate ones.
+    const pendingByPool = new Map();
+    pools.forEach((pool) => pendingByPool.set(pool.id, []));
+    pendingRequests.forEach((b) => {
+      if (pendingByPool.has(b.capacityPoolId)) pendingByPool.get(b.capacityPoolId).push(b);
+    });
+    const poolLaneInfo = new Map();
+    pendingByPool.forEach((list, poolId) => poolLaneInfo.set(poolId, assignLanes(list)));
+
     const rows = [];
     pools.forEach((pool) => {
       if (!pool.units.length) return;
       rows.push({ type: 'pool', name: pool.name });
-      rows.push({ type: 'pending', poolId: pool.id });
+      const laneCount = Math.max(1, poolLaneInfo.get(pool.id)?.laneCount || 0);
+      for (let lane = 0; lane < laneCount; lane++) {
+        rows.push({ type: 'pending', poolId: pool.id, lane });
+      }
       pool.units.forEach((unit) => rows.push({ type: 'unit', id: unit.id, name: unit.name }));
     });
 
@@ -265,7 +303,7 @@
     const pendingRowIndex = new Map();
     rows.forEach((row, i) => {
       if (row.type === 'unit') unitRowIndex.set(row.id, i + 2); // +2: header row is 1
-      if (row.type === 'pending') pendingRowIndex.set(row.poolId, i + 2);
+      if (row.type === 'pending') pendingRowIndex.set(`${row.poolId}:${row.lane}`, i + 2);
     });
 
     const cells = [];
@@ -282,7 +320,9 @@
       if (row.type === 'pool') {
         cells.push(`<div class="cal-pool-header" style="grid-column:1/-1; grid-row:${gridRow}">${row.name}</div>`);
       } else if (row.type === 'pending') {
-        cells.push(`<div class="cal-unit-label pending-label" style="grid-column:1; grid-row:${gridRow}">Pending Requests</div>`);
+        // Only label the first lane row so "Pending Requests" doesn't repeat once per lane.
+        const label = row.lane === 0 ? 'Pending Requests' : '';
+        cells.push(`<div class="cal-unit-label pending-label" style="grid-column:1; grid-row:${gridRow}">${label}</div>`);
         for (let c = 0; c < n; c++) {
           cells.push(`<div class="cal-day-cell" style="grid-column:${c + 2}; grid-row:${gridRow}"></div>`);
         }
@@ -317,16 +357,18 @@
 
       cells.push(`
         <div class="cal-booking ${statusClass}" draggable="true" data-booking-id="${b.id}"
-             ondragstart="onBookingDragStart(event, '${b.id}')" ondragend="onBookingDragEnd(event)"
-             style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType} — drag to move to a different unit">
+             ondragstart="onBookingDragStart(event, '${b.id}')" ondragend="onBookingDragEnd(event)" onclick="goToBooking('${b.id}')"
+             style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType} — click to check in/out, drag to move to a different unit">
           ${dogName}
         </div>
       `);
     });
 
-    // Pending-request bars — not draggable (no unit assigned yet to move from).
+    // Pending-request bars — not draggable (no unit assigned yet to move from),
+    // but still clickable to jump to that request in the queue.
     pendingRequests.forEach((b) => {
-      const gridRow = pendingRowIndex.get(b.capacityPoolId);
+      const lane = poolLaneInfo.get(b.capacityPoolId)?.laneAssignment.get(b.id) ?? 0;
+      const gridRow = pendingRowIndex.get(`${b.capacityPoolId}:${lane}`);
       if (!gridRow) return;
 
       const bStart = new Date(b.startDate);
@@ -340,7 +382,7 @@
       const dogName = b.dog?.name || 'Unknown dog';
 
       cells.push(`
-        <div class="cal-booking pending-status" style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType} — requested, not yet confirmed">
+        <div class="cal-booking pending-status" onclick="goToBooking('${b.id}')" style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType} — requested, not yet confirmed. Click to review.">
           ${dogName}
         </div>
       `);
@@ -353,6 +395,10 @@
   // different kennel/crate, keeping its dates unchanged — see PUT
   // /api/bookings/:id/reassign-unit.
   let draggedBookingId = null;
+  // Guards against a stray click firing right after a completed drag (some
+  // browsers still fire one on the source element) so dragging to reassign a
+  // unit doesn't also accidentally navigate away.
+  let justDragged = false;
 
   function onBookingDragStart(event, bookingId) {
     draggedBookingId = bookingId;
@@ -362,6 +408,15 @@
 
   function onBookingDragEnd(event) {
     event.target.classList.remove('dragging');
+    justDragged = true;
+    setTimeout(() => { justDragged = false; }, 0);
+  }
+
+  // Jumps to this booking in the staff queue (requests.html) — much faster
+  // than scrolling through the whole list to find it for check-in/out.
+  function goToBooking(bookingId) {
+    if (justDragged) return;
+    window.location.href = `requests.html?location_id=${encodeURIComponent(locationId)}&highlight=${encodeURIComponent(bookingId)}`;
   }
 
   function onDayCellDragOver(event) {

@@ -34,6 +34,12 @@
       border-radius: 8px;
       padding: 20px;
       margin-bottom: 16px;
+      transition: box-shadow 0.3s, border-color 0.3s;
+    }
+
+    .card.highlighted {
+      border-color: #4f46e5;
+      box-shadow: 0 0 0 3px rgba(79,70,229,0.25);
     }
 
     .request-header {
@@ -343,6 +349,23 @@
       loadSection('CONFIRMED', 'confirmed-list', confirmedActionsHtml, 'No confirmed bookings awaiting check-in.'),
       loadSection('ACTIVE', 'active-list', activeActionsHtml, 'No active stays awaiting check-out.'),
     ]);
+
+    highlightFromCalendarLink();
+  }
+
+  // Jumping here from a calendar bar (see calendar.html's goToBooking) lands
+  // on the top of the page with three long lists — scroll straight to the
+  // specific booking and flash a highlight so it's obvious which one it is.
+  function highlightFromCalendarLink() {
+    const highlightId = params.get('highlight');
+    if (!highlightId) return;
+
+    const card = document.getElementById(`booking-${highlightId}`);
+    if (!card) return;
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('highlighted');
+    setTimeout(() => card.classList.remove('highlighted'), 4000);
   }
 
   async function confirmBooking(id) {
