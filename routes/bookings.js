@@ -148,7 +148,7 @@ async function enrichBooking(booking, dogFieldMap, locationId, token) {
   };
 }
 
-const SERVICE_LABELS = { BOARDING: 'Boarding', DAY_CARE: 'Day Care', DAY_TRAINING: 'Day Training' };
+const SERVICE_LABELS = { BOARDING: 'Boarding', DAY_CARE: 'Day Care', DAY_TRAINING: 'Board and Train' };
 
 // Used to build a tap-to-open link in the staff notification text.
 const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
