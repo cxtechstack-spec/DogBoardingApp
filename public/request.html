@@ -191,10 +191,6 @@
       <a id="dog-form-gate-link" href="#" target="_blank" rel="noopener" class="btn-link">Open Form</a>
       <button class="btn" onclick="recheckDogForm()">I've submitted it — Continue</button>
     </div>
-    <div class="btn-row" style="margin-top:4px;">
-      <button class="btn-link" onclick="skipVaccineStep()">Skip — I'll provide this before drop-off</button>
-      <span></span>
-    </div>
     <p class="error-text" id="dog-form-gate-status" style="display:none; margin-top:8px;"></p>
   </div>
   <div id="vaccine-update-gate" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid #f0f0f0;">
@@ -309,7 +305,6 @@
     dogs: [],
     selectedDogId: null,
     newDog: null,
-    skipNewDogForm: false,
     activeGateType: null,
     ghlDogObjectId: null,
     selectedDogName: null,
@@ -425,13 +420,13 @@
 
   function selectDog(dogId) {
     state.selectedDogId = dogId;
-    state.skipNewDogForm = false;
     document.querySelectorAll('#dog-options .option-card').forEach((el) => {
       el.classList.toggle('selected', el.dataset.dogId === dogId);
     });
     // The intake form fully replaces these inline fields once a form URL is
-    // configured (unless skipped) — see showDogFormGate()/skipVaccineStep().
-    const useInlineNewDogFields = dogId === '__new__' && (!state.client.newDogFormUrl || state.skipNewDogForm);
+    // configured — see showDogFormGate(). A new dog can't skip past it; only
+    // an existing dog's vaccine update (skipVaccineStep()) can be skipped.
+    const useInlineNewDogFields = dogId === '__new__' && !state.client.newDogFormUrl;
     document.getElementById('new-dog-fields').style.display = useInlineNewDogFields ? 'block' : 'none';
     document.getElementById('dog-form-gate').style.display = 'none';
     document.getElementById('vaccine-update-gate').style.display = 'none';
@@ -516,22 +511,19 @@
     gate.style.display = 'block';
   }
 
-  // Lets an owner move on without providing vaccine info right now — booking
-  // still proceeds, but the dog's vaccine status stays missing/expired, which
-  // is already surfaced to staff (see requests.html's vaccine badge, and the
-  // "Vaccine records needed" flag added to the new-booking staff text).
+  // Lets an owner of an EXISTING dog move on without updating vaccine info
+  // right now — booking still proceeds, but the dog's vaccine status stays
+  // missing/expired, which is already surfaced to staff (see requests.html's
+  // vaccine badge, and the "Vaccine records needed" flag added to the
+  // new-booking staff text). Not available for a brand-new dog — see
+  // showDogFormGate(), which has no skip option, since that's the only
+  // chance to capture anything about the dog at all.
   function skipVaccineStep() {
-    if (state.activeGateType === 'new') {
-      document.getElementById('dog-form-gate').style.display = 'none';
-      document.getElementById('new-dog-fields').style.display = 'block';
-      state.skipNewDogForm = true;
-    } else {
-      document.getElementById('vaccine-update-gate').style.display = 'none';
-      state.ghlDogObjectId = state.selectedDogId;
-      state.selectedDogName = state.dogs.find((d) => d.id === state.selectedDogId)?.name ?? 'Dog';
-      renderServiceOptions();
-      showStep('service');
-    }
+    document.getElementById('vaccine-update-gate').style.display = 'none';
+    state.ghlDogObjectId = state.selectedDogId;
+    state.selectedDogName = state.dogs.find((d) => d.id === state.selectedDogId)?.name ?? 'Dog';
+    renderServiceOptions();
+    showStep('service');
   }
 
   // Collects updated vaccine expiration dates for one specific existing dog
@@ -671,7 +663,7 @@
     }
 
     if (state.selectedDogId === '__new__') {
-      if (state.client.newDogFormUrl && !state.skipNewDogForm) {
+      if (state.client.newDogFormUrl) {
         showDogFormGate();
         return;
       }

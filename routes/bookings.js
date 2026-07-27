@@ -819,7 +819,8 @@ router.put('/:id/check-out', asyncHandler(async (req, res) => {
       if (stripeCustomerId) {
         autoChargeAttempted = await postToWebhook(client.balanceAutoChargeWebhookUrl, {
           stripeCustomerId,
-          amount: remainder,
+          // Stripe's API wants an integer amount in cents, not dollars.
+          amountCents: Math.round(remainder * 100),
           description,
         });
       }
