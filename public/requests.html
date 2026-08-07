@@ -192,6 +192,17 @@
     return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
   }
 
+  // hhmm is a plain "HH:MM" wall-clock string (see Booking.dropOffTime/
+  // pickUpTime), not a real moment in time, so this just reformats the
+  // string rather than going through Date/timeZone conversion.
+  function formatTime(hhmm) {
+    if (!hhmm) return '';
+    const [hour, minute] = hhmm.split(':').map(Number);
+    const period = hour < 12 ? 'AM' : 'PM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${String(minute).padStart(2, '0')} ${period}`;
+  }
+
   // createdAt is a real moment in time (not a pure calendar date), so unlike
   // formatDate this shows in the viewer's own local time.
   function formatDateTime(iso) {
@@ -254,6 +265,12 @@
             <span class="field-label">Dates</span>
             <span class="field-value">${formatDate(b.startDate)} – ${formatDate(b.endDate)}</span>
           </div>
+          ${b.dropOffTime && b.pickUpTime ? `
+            <div>
+              <span class="field-label">Drop-off / Pick-up Time</span>
+              <span class="field-value">${formatTime(b.dropOffTime)} / ${formatTime(b.pickUpTime)}</span>
+            </div>
+          ` : ''}
           <div>
             <span class="field-label">Add-Ons</span>
             <span class="field-value">${addOnsText}</span>

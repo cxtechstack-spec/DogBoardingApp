@@ -402,13 +402,18 @@ router.post('/', asyncHandler(async (req, res) => {
     serviceType,
     startDate,
     endDate,
+    dropOffTime,
+    pickUpTime,
     addOnsSelected,
     ghlDogObjectId,
     ghlOwnerContactId,
   } = req.body;
 
-  if (!serviceType || !startDate || !endDate || !ghlDogObjectId || !ghlOwnerContactId) {
-    return res.status(400).json({ error: 'serviceType, startDate, endDate, ghlDogObjectId, and ghlOwnerContactId required' });
+  if (!serviceType || !startDate || !endDate || !dropOffTime || !pickUpTime || !ghlDogObjectId || !ghlOwnerContactId) {
+    return res.status(400).json({ error: 'serviceType, startDate, endDate, dropOffTime, pickUpTime, ghlDogObjectId, and ghlOwnerContactId required' });
+  }
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(dropOffTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(pickUpTime)) {
+    return res.status(400).json({ error: 'dropOffTime and pickUpTime must be in HH:MM 24-hour format' });
   }
 
   const client = await getClient(locationId);
@@ -441,6 +446,8 @@ router.post('/', asyncHandler(async (req, res) => {
       serviceType,
       startDate: new Date(startDate),
       endDate: new Date(endDate),
+      dropOffTime,
+      pickUpTime,
       addOnsSelected: JSON.stringify(snapshotAddOns),
       status: 'REQUESTED',
       lockedRate: service.baseRate,

@@ -197,6 +197,17 @@
     return `${DAY_LABELS[d.getUTCDay()]} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
   }
 
+  // hhmm is a plain "HH:MM" wall-clock string (see Booking.dropOffTime/
+  // pickUpTime), not a real moment in time, so this just reformats the
+  // string rather than going through Date/timeZone conversion.
+  function formatTime(hhmm) {
+    if (!hhmm) return '';
+    const [hour, minute] = hhmm.split(':').map(Number);
+    const period = hour < 12 ? 'AM' : 'PM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${String(minute).padStart(2, '0')} ${period}`;
+  }
+
   function formatRangeLabel() {
     const days = rangeDays();
     const first = days[0];
@@ -354,11 +365,12 @@
       const colEnd = daysBetween(rangeStart, clippedEnd) + 3;
       const dogName = b.dog?.name || 'Unknown dog';
       const statusClass = b.status === 'ACTIVE' ? 'active-status' : '';
+      const timesNote = b.dropOffTime && b.pickUpTime ? ` — drop-off ${formatTime(b.dropOffTime)}, pick-up ${formatTime(b.pickUpTime)}` : '';
 
       cells.push(`
         <div class="cal-booking ${statusClass}" draggable="true" data-booking-id="${b.id}"
              ondragstart="onBookingDragStart(event, '${b.id}')" ondragend="onBookingDragEnd(event)" onclick="goToBooking('${b.id}')"
-             style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType} — click to check in/out, drag to move to a different unit">
+             style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType}${timesNote} — click to check in/out, drag to move to a different unit">
           ${dogName}
         </div>
       `);
@@ -380,9 +392,10 @@
       const colStart = daysBetween(rangeStart, clippedStart) + 2;
       const colEnd = daysBetween(rangeStart, clippedEnd) + 3;
       const dogName = b.dog?.name || 'Unknown dog';
+      const timesNote = b.dropOffTime && b.pickUpTime ? ` — drop-off ${formatTime(b.dropOffTime)}, pick-up ${formatTime(b.pickUpTime)}` : '';
 
       cells.push(`
-        <div class="cal-booking pending-status" onclick="goToBooking('${b.id}')" style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType} — requested, not yet confirmed. Click to review.">
+        <div class="cal-booking pending-status" onclick="goToBooking('${b.id}')" style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType}${timesNote} — requested, not yet confirmed. Click to review.">
           ${dogName}
         </div>
       `);

@@ -249,6 +249,16 @@
       <input type="date" id="end-date">
     </div>
   </div>
+  <div class="field-row">
+    <div>
+      <label class="field-label">Drop-off Time</label>
+      <input type="time" id="drop-off-time">
+    </div>
+    <div>
+      <label class="field-label">Pick-up Time</label>
+      <input type="time" id="pick-up-time">
+    </div>
+  </div>
   <p class="error-text" id="dates-error" style="display:none"></p>
   <div class="btn-row">
     <button class="btn-link" onclick="showStep('service')">Back</button>
@@ -312,6 +322,8 @@
     service: null,
     startDate: null,
     endDate: null,
+    dropOffTime: null,
+    pickUpTime: null,
     selectedAddOns: {}, // addOnId -> qty
     quote: null,
     // Dogs already fully configured (service/dates/add-ons) in this same
@@ -731,6 +743,8 @@
 
     const startDate = document.getElementById('start-date').value;
     const endDate = document.getElementById('end-date').value;
+    const dropOffTime = document.getElementById('drop-off-time').value;
+    const pickUpTime = document.getElementById('pick-up-time').value;
     if (!startDate || !endDate) {
       errorEl.textContent = 'Please select both a start and end date.';
       errorEl.style.display = 'block';
@@ -738,6 +752,11 @@
     }
     if (endDate < startDate) {
       errorEl.textContent = 'End date must be on or after the start date.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    if (!dropOffTime || !pickUpTime) {
+      errorEl.textContent = 'Please select both a drop-off and pick-up time.';
       errorEl.style.display = 'block';
       return;
     }
@@ -752,6 +771,8 @@
 
     state.startDate = startDate;
     state.endDate = endDate;
+    state.dropOffTime = dropOffTime;
+    state.pickUpTime = pickUpTime;
     renderAddonOptions();
     showStep('addons');
   }
@@ -888,6 +909,8 @@
       service: state.service,
       startDate: state.startDate,
       endDate: state.endDate,
+      dropOffTime: state.dropOffTime,
+      pickUpTime: state.pickUpTime,
       selectedAddOns: { ...state.selectedAddOns },
       quote,
     });
@@ -898,6 +921,8 @@
     state.service = null;
     state.startDate = null;
     state.endDate = null;
+    state.dropOffTime = null;
+    state.pickUpTime = null;
     state.selectedAddOns = {};
     state.quote = null;
 
@@ -915,6 +940,8 @@
       serviceType: state.serviceType,
       startDate: state.startDate,
       endDate: state.endDate,
+      dropOffTime: state.dropOffTime,
+      pickUpTime: state.pickUpTime,
       selectedAddOns: state.selectedAddOns,
       quote: state.quote,
     };
@@ -930,6 +957,8 @@
           serviceType: entry.serviceType,
           startDate: entry.startDate,
           endDate: entry.endDate,
+          dropOffTime: entry.dropOffTime,
+          pickUpTime: entry.pickUpTime,
           addOnsSelected: Object.entries(entry.selectedAddOns).map(([addOnId, qty]) => ({ addOnId, qty })),
           ghlDogObjectId: entry.ghlDogObjectId,
           ghlOwnerContactId: state.contact.id,

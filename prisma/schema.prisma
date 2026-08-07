@@ -153,6 +153,13 @@ model Booking {
   serviceType           ServiceType
   startDate             DateTime // As booked — the final bill uses actualStartDate/actualEndDate instead (see lib/quote.js)
   endDate               DateTime // As booked
+  // Requested drop-off/pick-up time of day, "HH:MM" 24-hour — scheduling
+  // info for staff only. Never factors into billing (see lib/quote.js),
+  // which is still computed purely from startDate/endDate. Nullable at the
+  // DB level so existing bookings don't need a backfill; the API requires
+  // both on every new booking (see POST /api/bookings).
+  dropOffTime           String?
+  pickUpTime            String?
   // Real drop-off/pickup dates, set at Check In / Check Out. The final invoice
   // is computed from these, not startDate/endDate, so an extended or
   // early-ended stay is billed for what actually happened, not what was
