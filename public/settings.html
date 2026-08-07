@@ -218,6 +218,27 @@
   <span class="save-status" id="status-intake-forms"></span>
 </div>
 
+<!-- FINAL INVOICE TIMING -->
+<div class="card">
+  <h2>Final Invoice Timing</h2>
+  <p style="color:#666; font-size:12px; margin-bottom:12px;">
+    When the balance invoice goes out. At Check-Out (default) waits for the real pickup date, so an extended or
+    early-ended stay is billed for what actually happened. At Check-In sends it the moment the dog is dropped
+    off instead — billed from the originally booked dates, since the real pickup date isn't known yet.
+  </p>
+  <div class="field-row full">
+    <div>
+      <label class="field-label">Send Balance Invoice</label>
+      <select id="final-invoice-timing">
+        <option value="at_checkout">At Check-Out (default)</option>
+        <option value="at_checkin">At Check-In</option>
+      </select>
+    </div>
+  </div>
+  <button class="save-btn" onclick="saveFinalInvoiceTiming()">Save</button>
+  <span class="save-status" id="status-final-invoice-timing"></span>
+</div>
+
 <!-- BALANCE AUTO-CHARGE -->
 <div class="card">
   <h2>Balance Auto-Charge</h2>
@@ -835,6 +856,21 @@
     setTimeout(() => { status.textContent = ''; }, 3000);
   }
 
+  async function saveFinalInvoiceTiming() {
+    const status = document.getElementById('status-final-invoice-timing');
+    const finalInvoiceTiming = document.getElementById('final-invoice-timing').value;
+
+    status.textContent = 'Saving…';
+    const res = await fetch(API('/api/settings/final-invoice-timing'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ finalInvoiceTiming }),
+    });
+
+    status.textContent = res.ok ? '✓ Saved' : '✗ Error';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
+
   async function saveBalanceAutoCharge() {
     const status = document.getElementById('status-balance-auto-charge');
     const balanceAutoChargeWebhookUrl = document.getElementById('balance-auto-charge-url').value.trim();
@@ -889,6 +925,7 @@
     document.getElementById('business-name').value = client.businessName || '';
     document.getElementById('new-dog-form-url').value = client.newDogFormUrl || '';
     document.getElementById('vaccine-update-form-url').value = client.vaccineUpdateFormUrl || '';
+    document.getElementById('final-invoice-timing').value = client.finalInvoiceTiming || 'at_checkout';
     document.getElementById('balance-auto-charge-url').value = client.balanceAutoChargeWebhookUrl || '';
     document.getElementById('denial-notification-url').value = client.denialNotificationWebhookUrl || '';
     document.getElementById('staff-notify-name').value = client.staffNotifyName || '';

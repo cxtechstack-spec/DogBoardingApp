@@ -124,6 +124,58 @@ async function postToWebhook(webhookUrl, payload) {
   }
 }
 
+// Shared by Check In and Check Out — which one calls this depends on the
+// client's finalInvoiceTiming setting (see PUT /:id/check-in and
+// PUT /:id/check-out). Computes what's left to collect from the booking's own
+// locked-in rate/add-ons snapshot, and if there's a balance, creates the
+// invoice and attempts auto-charge if configured. Bills from whatever
+// start/end the passed-in booking object already carries — at Check In time
+// (finalInvoiceTiming 'at_checkin') that's still the originally booked dates,
+// since actualEndDate isn't known yet; the Check Out caller stamps
+// actualEndDate onto the booking object before calling this, so it bills the
+// real stay instead.
+async function sendRemainderInvoice({ client, booking, service, locationId, token }) {
+  const stayTotal = computeStayTotalFromBooking(booking, service);
+
+  let depositPaid = 0;
+  if (booking.ghlInvoiceId) {
+    const depositStatus = await getInvoiceStatus(booking.ghlInvoiceId, locationId, token);
+    depositPaid = depositStatus.amountPaid ?? 0;
+  }
+
+  const remainder = Math.round((stayTotal - depositPaid) * 100) / 100;
+  if (remainder <= 0) return { ok: true, remainder, remainderInvoiceId: null, autoChargeAttempted: false };
+
+  const contact = await getContact(booking.ghlOwnerContactId, token);
+  if (!contact) return { ok: false, status: 404, error: 'Owner contact not found' };
+
+  const start = booking.actualStartDate ?? booking.startDate;
+  const end = booking.actualEndDate ?? booking.endDate;
+  const dateRange = `${start.toISOString().slice(0, 10)} to ${end.toISOString().slice(0, 10)}`;
+  const description = `Balance Due — ${SERVICE_LABELS[booking.serviceType] || booking.serviceType} (${dateRange})`;
+
+  // The invoice is still created either way — it's the business's own record
+  // of what's owed, and the fallback if auto-charge isn't set up or doesn't
+  // have a usable Stripe customer yet.
+  const created = await createAndSendInvoice({ locationId, contact, description, amount: remainder, token });
+  const remainderInvoiceId = created.invoiceId;
+
+  let autoChargeAttempted = false;
+  if (client.balanceAutoChargeWebhookUrl) {
+    const stripeCustomerId = await ensureStripeCustomerId(booking, locationId, token);
+    if (stripeCustomerId) {
+      autoChargeAttempted = await postToWebhook(client.balanceAutoChargeWebhookUrl, {
+        stripeCustomerId,
+        // Stripe's API wants an integer amount in cents, not dollars.
+        amountCents: Math.round(remainder * 100),
+        description,
+      });
+    }
+  }
+
+  return { ok: true, remainder, remainderInvoiceId, autoChargeAttempted };
+}
+
 // Shared dog/owner/vaccine/unit enrichment — used by both the staff queue and
 // the calendar view, which need the same live-resolved GHL + unit info per booking.
 // Degrades gracefully (dog: null) if the mapping isn't configured yet, rather than
@@ -761,12 +813,36 @@ router.put('/:id/check-in', asyncHandler(async (req, res) => {
     await ensureStripeCustomerId(booking, locationId, token);
   }
 
+  // Some businesses want the balance invoice out the moment the dog is
+  // dropped off rather than waiting for actual pickup — see
+  // sendRemainderInvoice() for why this bills the originally booked dates,
+  // not whatever the real stay turns out to be.
+  let remainderResult = null;
+  if (client.finalInvoiceTiming === 'at_checkin') {
+    const service = client.services.find((s) => s.serviceType === booking.serviceType);
+    if (!service) return res.status(400).json({ error: `${booking.serviceType} is no longer configured for this client` });
+    remainderResult = await sendRemainderInvoice({ client, booking, service, locationId, token });
+    if (!remainderResult.ok) return res.status(remainderResult.status).json({ error: remainderResult.error });
+  }
+
   const updated = await db.booking.update({
     where: { id: req.params.id },
-    data: { status: 'ACTIVE', actualStartDate: todayUTC(), vaccineCheckDropoff: JSON.stringify(vaccineCheck) },
+    data: {
+      status: 'ACTIVE',
+      actualStartDate: todayUTC(),
+      vaccineCheckDropoff: JSON.stringify(vaccineCheck),
+      ...(remainderResult?.remainderInvoiceId ? { ghlRemainderInvoiceId: remainderResult.remainderInvoiceId } : {}),
+    },
   });
 
-  res.json({ booking: updated });
+  res.json({
+    booking: updated,
+    ...(remainderResult ? {
+      remainder: remainderResult.remainder,
+      remainderInvoiceId: remainderResult.remainderInvoiceId,
+      autoChargeAttempted: remainderResult.autoChargeAttempted,
+    } : {}),
+  });
 }));
 
 // PUT /api/bookings/:id/check-out
@@ -795,43 +871,19 @@ router.put('/:id/check-out', asyncHandler(async (req, res) => {
   // what was originally booked — actualStartDate was already set at Check In;
   // actualEndDate is "today" (real pickup date) instead of the booked endDate.
   const actualEndDate = todayUTC();
-  const stayTotal = computeStayTotalFromBooking({ ...booking, actualEndDate }, service);
 
-  let depositPaid = 0;
-  if (booking.ghlInvoiceId) {
-    const depositStatus = await getInvoiceStatus(booking.ghlInvoiceId, locationId, token);
-    depositPaid = depositStatus.amountPaid ?? 0;
-  }
-
-  const remainder = Math.round((stayTotal - depositPaid) * 100) / 100;
-
-  let remainderInvoiceId = null;
+  // If this business invoices at Check In instead (finalInvoiceTiming
+  // 'at_checkin'), the balance was already sent then — booking.ghlRemainderInvoiceId
+  // already holds it, so there's nothing left to bill here.
+  let remainder = 0;
+  let remainderInvoiceId = booking.ghlRemainderInvoiceId;
   let autoChargeAttempted = false;
-  if (remainder > 0) {
-    const contact = await getContact(booking.ghlOwnerContactId, token);
-    if (!contact) return res.status(404).json({ error: 'Owner contact not found' });
-
-    const actualStart = booking.actualStartDate ?? booking.startDate;
-    const dateRange = `${actualStart.toISOString().slice(0, 10)} to ${actualEndDate.toISOString().slice(0, 10)}`;
-    const description = `Balance Due — ${SERVICE_LABELS[booking.serviceType] || booking.serviceType} (${dateRange})`;
-
-    // The invoice is still created either way — it's the business's own
-    // record of what's owed, and the fallback if auto-charge isn't set up or
-    // doesn't have a usable Stripe customer yet.
-    const created = await createAndSendInvoice({ locationId, contact, description, amount: remainder, token });
-    remainderInvoiceId = created.invoiceId;
-
-    if (client.balanceAutoChargeWebhookUrl) {
-      const stripeCustomerId = await ensureStripeCustomerId(booking, locationId, token);
-      if (stripeCustomerId) {
-        autoChargeAttempted = await postToWebhook(client.balanceAutoChargeWebhookUrl, {
-          stripeCustomerId,
-          // Stripe's API wants an integer amount in cents, not dollars.
-          amountCents: Math.round(remainder * 100),
-          description,
-        });
-      }
-    }
+  if (client.finalInvoiceTiming !== 'at_checkin') {
+    const result = await sendRemainderInvoice({ client, booking: { ...booking, actualEndDate }, service, locationId, token });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    remainder = result.remainder;
+    remainderInvoiceId = result.remainderInvoiceId;
+    autoChargeAttempted = result.autoChargeAttempted;
   }
 
   const updated = await db.booking.update({
@@ -844,7 +896,13 @@ router.put('/:id/check-out', asyncHandler(async (req, res) => {
   // run asynchronously, so there's no synchronous success/failure to report
   // here. Staff should still confirm via GHL's Transactions/Payments that it
   // actually went through, especially early on.
-  res.json({ booking: updated, remainder, remainderInvoiceId, autoChargeAttempted });
+  res.json({
+    booking: updated,
+    remainder,
+    remainderInvoiceId,
+    autoChargeAttempted,
+    invoicedAtCheckIn: client.finalInvoiceTiming === 'at_checkin',
+  });
 }));
 
 export default router;

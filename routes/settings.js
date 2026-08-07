@@ -479,6 +479,28 @@ router.put('/balance-auto-charge', asyncHandler(async (req, res) => {
   res.json({ client: { ...updated, ghlConnected: !!ghlApiTokenEncrypted } });
 }));
 
+// PUT /api/settings/final-invoice-timing
+// When the balance/remainder invoice goes out — "at_checkout" (default) bills
+// the real pickup date once it's known; "at_checkin" sends it as soon as the
+// dog is dropped off, billed from the originally booked end date instead.
+router.put('/final-invoice-timing', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const { finalInvoiceTiming } = req.body;
+  if (!['at_checkout', 'at_checkin'].includes(finalInvoiceTiming)) {
+    return res.status(400).json({ error: 'finalInvoiceTiming must be "at_checkout" or "at_checkin"' });
+  }
+  const client = await getOrCreateClient(locationId);
+
+  const { ghlApiTokenEncrypted, ...updated } = await db.client.update({
+    where: { id: client.id },
+    data: { finalInvoiceTiming },
+  });
+
+  res.json({ client: { ...updated, ghlConnected: !!ghlApiTokenEncrypted } });
+}));
+
 // PUT /api/settings/denial-notification
 // This business's own GHL Workflow webhook URL (Inbound Webhook -> Find
 // Contact -> Send Email + Send SMS) — Deny POSTs the contact ID, dog name,

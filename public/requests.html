@@ -426,6 +426,18 @@
       alert(error);
       return;
     }
+    const body = await res.json();
+    // remainder/autoChargeAttempted are only present when this business bills
+    // at Check In (finalInvoiceTiming 'at_checkin') — see PUT .../check-in.
+    if ('remainder' in body) {
+      if (body.remainder <= 0) {
+        alert('Checked in. No balance due.');
+      } else if (body.autoChargeAttempted) {
+        alert(`Checked in. A charge for $${body.remainder.toFixed(2)} was sent to be processed automatically — check GHL's Transactions to confirm it went through. A balance invoice was also sent as a backup.`);
+      } else {
+        alert(`Checked in. A balance invoice for $${body.remainder.toFixed(2)} has been sent to the client.`);
+      }
+    }
     loadAll();
   }
 
@@ -436,8 +448,10 @@
       alert(error);
       return;
     }
-    const { remainder, autoChargeAttempted } = await res.json();
-    if (remainder <= 0) {
+    const { remainder, autoChargeAttempted, invoicedAtCheckIn } = await res.json();
+    if (invoicedAtCheckIn) {
+      alert('Checked out. The balance invoice for this stay was already sent at Check In.');
+    } else if (remainder <= 0) {
       alert('Checked out. No balance due.');
     } else if (autoChargeAttempted) {
       alert(`Checked out. A charge for $${remainder.toFixed(2)} was sent to be processed automatically — check GHL's Transactions to confirm it went through. A balance invoice was also sent as a backup.`);

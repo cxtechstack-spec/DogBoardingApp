@@ -37,6 +37,13 @@ model Client {
   // channel (just SMS or just email) can silently fail to reach someone. If
   // this is blank, Deny falls back to a plain direct SMS instead.
   denialNotificationWebhookUrl String?
+  // When the balance/remainder invoice goes out: "at_checkout" (default) uses
+  // the real actual pickup date once it's known, so the invoice reflects
+  // exactly what happened. "at_checkin" sends it as soon as the dog is
+  // dropped off instead, computed from the originally booked end date since
+  // the real pickup date isn't known yet — some businesses prefer getting it
+  // out immediately over it being adjusted for an early/late pickup.
+  finalInvoiceTiming           String            @default("at_checkout")
   services                     ServiceSettings[]
   addOns                       AddOn[]
   capacityPools                CapacityPool[]
