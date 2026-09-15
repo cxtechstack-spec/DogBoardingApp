@@ -884,7 +884,20 @@ router.put('/:id/check-out', asyncHandler(async (req, res) => {
   // Bill for what actually happened (extended stay, early pickup, etc.), not
   // what was originally booked — actualStartDate was already set at Check In;
   // actualEndDate is "today" (real pickup date) instead of the booked endDate.
-  const actualEndDate = todayUTC();
+  // Staff can override both here for the same reason as Check In (see there):
+  // a busy or short-staffed front desk doesn't always click this the moment
+  // the dog actually leaves, and billing would otherwise silently run short.
+  let actualEndDate = todayUTC();
+  if (req.body?.actualEndDate) {
+    const parsed = new Date(`${req.body.actualEndDate}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'Invalid actualEndDate' });
+    if (parsed > todayUTC()) return res.status(400).json({ error: 'actualEndDate cannot be in the future' });
+    if (booking.actualStartDate && parsed < booking.actualStartDate) {
+      return res.status(400).json({ error: 'actualEndDate cannot be before the actual check-in date' });
+    }
+    actualEndDate = parsed;
+  }
+  const pickUpTime = req.body?.pickUpTime || booking.pickUpTime;
 
   // If this business invoices at Check In instead (finalInvoiceTiming
   // 'at_checkin'), the balance was already sent then — booking.ghlRemainderInvoiceId
@@ -902,7 +915,7 @@ router.put('/:id/check-out', asyncHandler(async (req, res) => {
 
   const updated = await db.booking.update({
     where: { id: req.params.id },
-    data: { status: 'COMPLETED', actualEndDate, ghlRemainderInvoiceId: remainderInvoiceId },
+    data: { status: 'COMPLETED', actualEndDate, pickUpTime, ghlRemainderInvoiceId: remainderInvoiceId },
   });
 
   // autoChargeAttempted only means the charge request was accepted by GHL's

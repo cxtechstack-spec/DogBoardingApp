@@ -342,11 +342,19 @@
     `;
   }
 
+  // Same reasoning as confirmedActionsHtml's Check In fields — see there.
   function activeActionsHtml(b) {
+    const now = new Date();
+    const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const nowLocal = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     return `
       <div class="actions single">
         <a href="${kennelCardUrl(b.id)}" target="_blank" style="text-decoration:none; display:inline-flex; align-items:center; padding:8px 14px; border:1px solid #d0d0d0; border-radius:6px; font-size:13px; font-weight:500; color:#444; background:#fff;">Print Kennel Card</a>
-        <button class="confirm-btn" onclick="checkOutBooking('${b.id}')">Check Out</button>
+        <div class="action-group">
+          <input type="date" id="checkout-date-${b.id}" value="${todayLocal}" max="${todayLocal}" title="Actual pick-up date">
+          <input type="time" id="checkout-time-${b.id}" value="${b.pickUpTime || nowLocal}" title="Actual pick-up time">
+          <button class="confirm-btn" onclick="checkOutBooking('${b.id}')">Check Out</button>
+        </div>
       </div>
     `;
   }
@@ -460,7 +468,13 @@
   }
 
   async function checkOutBooking(id) {
-    const res = await fetch(API(`/api/bookings/${id}/check-out`), { method: 'PUT' });
+    const actualEndDate = document.getElementById(`checkout-date-${id}`).value;
+    const pickUpTime = document.getElementById(`checkout-time-${id}`).value;
+    const res = await fetch(API(`/api/bookings/${id}/check-out`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actualEndDate, pickUpTime }),
+    });
     if (!res.ok) {
       const { error } = await res.json();
       alert(error);
