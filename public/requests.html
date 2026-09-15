@@ -112,7 +112,7 @@
 
     .action-group { display: flex; gap: 8px; align-items: center; }
 
-    input[type="text"], textarea, select {
+    input[type="text"], input[type="date"], input[type="time"], textarea, select {
       width: 100%;
       padding: 7px 10px;
       border: 1px solid #d0d0d0;
@@ -321,11 +321,23 @@
     return `kennel-card.html?location_id=${encodeURIComponent(locationId)}&bookingId=${encodeURIComponent(bookingId)}`;
   }
 
+  // Defaults the date/time inputs to right now, but staff can back-date them —
+  // busy or short-staffed days mean Check In sometimes doesn't get clicked until
+  // the next day, and billing (see lib/quote.js) runs off actualStartDate, so
+  // leaving it stuck on "whenever the button was clicked" quietly shorts the
+  // business for however many nights the dog was already there.
   function confirmedActionsHtml(b) {
+    const now = new Date();
+    const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const nowLocal = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     return `
       <div class="actions single">
         <a href="${kennelCardUrl(b.id)}" target="_blank" style="text-decoration:none; display:inline-flex; align-items:center; padding:8px 14px; border:1px solid #d0d0d0; border-radius:6px; font-size:13px; font-weight:500; color:#444; background:#fff;">Print Kennel Card</a>
-        <button class="confirm-btn" onclick="checkInBooking('${b.id}')">Check In</button>
+        <div class="action-group">
+          <input type="date" id="checkin-date-${b.id}" value="${todayLocal}" max="${todayLocal}" title="Actual drop-off date">
+          <input type="time" id="checkin-time-${b.id}" value="${b.dropOffTime || nowLocal}" title="Actual drop-off time">
+          <button class="confirm-btn" onclick="checkInBooking('${b.id}')">Check In</button>
+        </div>
       </div>
     `;
   }
@@ -420,7 +432,13 @@
   }
 
   async function checkInBooking(id) {
-    const res = await fetch(API(`/api/bookings/${id}/check-in`), { method: 'PUT' });
+    const actualStartDate = document.getElementById(`checkin-date-${id}`).value;
+    const dropOffTime = document.getElementById(`checkin-time-${id}`).value;
+    const res = await fetch(API(`/api/bookings/${id}/check-in`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actualStartDate, dropOffTime }),
+    });
     if (!res.ok) {
       const { error } = await res.json();
       alert(error);

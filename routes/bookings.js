@@ -799,6 +799,19 @@ router.put('/:id/check-in', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: `Cannot check in a booking with status ${booking.status}` });
   }
 
+  // Staff don't always click Check In the moment a dog actually arrives (short-staffed,
+  // busy front desk) — lets them back-date to when it really happened instead of
+  // silently billing from whenever they got around to clicking the button. Defaults to
+  // today/the originally requested drop-off time when the caller doesn't override them.
+  let actualStartDate = todayUTC();
+  if (req.body?.actualStartDate) {
+    const parsed = new Date(`${req.body.actualStartDate}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'Invalid actualStartDate' });
+    if (parsed > todayUTC()) return res.status(400).json({ error: 'actualStartDate cannot be in the future' });
+    actualStartDate = parsed;
+  }
+  const dropOffTime = req.body?.dropOffTime || booking.dropOffTime;
+
   let vaccineCheck;
   try {
     const status = await getVaccineStatus(booking.ghlDogObjectId, dogFieldMap, token);
@@ -829,7 +842,8 @@ router.put('/:id/check-in', asyncHandler(async (req, res) => {
     where: { id: req.params.id },
     data: {
       status: 'ACTIVE',
-      actualStartDate: todayUTC(),
+      actualStartDate,
+      dropOffTime,
       vaccineCheckDropoff: JSON.stringify(vaccineCheck),
       ...(remainderResult?.remainderInvoiceId ? { ghlRemainderInvoiceId: remainderResult.remainderInvoiceId } : {}),
     },
