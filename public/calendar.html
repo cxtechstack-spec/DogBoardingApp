@@ -126,6 +126,12 @@
     .cal-booking.pending-status { background: #f59e0b; cursor: pointer; }
     .cal-booking.dragging { opacity: 0.4; }
 
+    /* Deposit invoice was sent at Confirm but hasn't been paid yet — flagged
+       here (not just on the requests.html queue) since this is where staff
+       actually work day to day and would otherwise miss it until it silently
+       rolls into the final balance at checkout. */
+    .cal-booking.deposit-unpaid { box-shadow: inset 0 0 0 2px #f59e0b; }
+
     .cal-unit-label.pending-label { color: #b45309; font-style: italic; }
 
     .cal-day-cell.drag-over { background: #eef2ff; }
@@ -366,12 +372,19 @@
       const dogName = b.dog?.name || 'Unknown dog';
       const statusClass = b.status === 'ACTIVE' ? 'active-status' : '';
       const timesNote = b.dropOffTime && b.pickUpTime ? ` — drop-off ${formatTime(b.dropOffTime)}, pick-up ${formatTime(b.pickUpTime)}` : '';
+      // Only flagged before Check In — past that point its amount either got
+      // paid or already got folded into the balance invoice at Check In/Out
+      // (see routes/bookings.js's sendRemainderInvoice), so it's no longer
+      // something staff need to chase.
+      const depositUnpaid = b.status === 'CONFIRMED' && b.deposit?.required && !b.deposit?.paid;
+      const depositClass = depositUnpaid ? 'deposit-unpaid' : '';
+      const depositNote = depositUnpaid ? ' — ⚠️ deposit unpaid' : '';
 
       cells.push(`
-        <div class="cal-booking ${statusClass}" draggable="true" data-booking-id="${b.id}"
+        <div class="cal-booking ${statusClass} ${depositClass}" draggable="true" data-booking-id="${b.id}"
              ondragstart="onBookingDragStart(event, '${b.id}')" ondragend="onBookingDragEnd(event)" onclick="goToBooking('${b.id}')"
-             style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType}${timesNote} — click to check in/out, drag to move to a different unit">
-          ${dogName}
+             style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}" title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType}${timesNote}${depositNote} — click to check in/out, drag to move to a different unit">
+          ${depositUnpaid ? '⚠️ ' : ''}${dogName}
         </div>
       `);
     });

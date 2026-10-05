@@ -336,7 +336,7 @@
         <div class="action-group">
           <input type="date" id="checkin-date-${b.id}" value="${todayLocal}" max="${todayLocal}" title="Actual drop-off date">
           <input type="time" id="checkin-time-${b.id}" value="${b.dropOffTime || nowLocal}" title="Actual drop-off time">
-          <button class="confirm-btn" onclick="checkInBooking('${b.id}')">Check In</button>
+          <button class="confirm-btn" onclick="checkInBooking(event, '${b.id}')">Check In</button>
         </div>
       </div>
     `;
@@ -353,7 +353,7 @@
         <div class="action-group">
           <input type="date" id="checkout-date-${b.id}" value="${todayLocal}" max="${todayLocal}" title="Actual pick-up date">
           <input type="time" id="checkout-time-${b.id}" value="${b.pickUpTime || nowLocal}" title="Actual pick-up time">
-          <button class="confirm-btn" onclick="checkOutBooking('${b.id}')">Check Out</button>
+          <button class="confirm-btn" onclick="checkOutBooking(event, '${b.id}')">Check Out</button>
         </div>
       </div>
     `;
@@ -439,7 +439,12 @@
     loadAll();
   }
 
-  async function checkInBooking(id) {
+  async function checkInBooking(event, id) {
+    // Disabled immediately so a slow GHL round-trip (creating/sending an
+    // invoice) can't be double/triple-tapped into sending the deposit/balance
+    // invoice more than once — see routes/bookings.js's withBookingLock.
+    const button = event.target;
+    button.disabled = true;
     const actualStartDate = document.getElementById(`checkin-date-${id}`).value;
     const dropOffTime = document.getElementById(`checkin-time-${id}`).value;
     const res = await fetch(API(`/api/bookings/${id}/check-in`), {
@@ -450,6 +455,7 @@
     if (!res.ok) {
       const { error } = await res.json();
       alert(error);
+      button.disabled = false;
       return;
     }
     const body = await res.json();
@@ -467,7 +473,10 @@
     loadAll();
   }
 
-  async function checkOutBooking(id) {
+  async function checkOutBooking(event, id) {
+    // Disabled immediately — same reasoning as checkInBooking above.
+    const button = event.target;
+    button.disabled = true;
     const actualEndDate = document.getElementById(`checkout-date-${id}`).value;
     const pickUpTime = document.getElementById(`checkout-time-${id}`).value;
     const res = await fetch(API(`/api/bookings/${id}/check-out`), {
@@ -478,6 +487,7 @@
     if (!res.ok) {
       const { error } = await res.json();
       alert(error);
+      button.disabled = false;
       return;
     }
     const { remainder, autoChargeAttempted, invoicedAtCheckIn } = await res.json();

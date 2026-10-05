@@ -11,6 +11,7 @@ import { asyncHandler } from '../lib/async-handler.js';
 import { ghlRequest } from '../lib/ghl.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { listCustomObjectTypes, getObjectFields } from '../lib/ghl-contacts.js';
+import { getAuthUrl, exchangeCodeForTokens, getUserEmail } from '../lib/google-calendar.js';
 
 const router = Router();
 
@@ -31,8 +32,14 @@ router.get('/', asyncHandler(async (req, res) => {
   const locationId = req.query.location_id;
   if (!locationId) return res.status(400).json({ error: 'location_id required' });
 
-  const { ghlApiTokenEncrypted, ...client } = await getOrCreateClient(locationId);
-  res.json({ client: { ...client, ghlConnected: !!ghlApiTokenEncrypted } });
+  const { ghlApiTokenEncrypted, googleAccessTokenEncrypted, googleRefreshTokenEncrypted, ...client } = await getOrCreateClient(locationId);
+  res.json({
+    client: {
+      ...client,
+      ghlConnected: !!ghlApiTokenEncrypted,
+      googleConnected: !!googleAccessTokenEncrypted,
+    },
+  });
 }));
 
 // PUT /api/settings/ghl-connection
@@ -63,6 +70,83 @@ router.put('/ghl-connection', asyncHandler(async (req, res) => {
   });
 
   res.json({ ghlConnected: true });
+}));
+
+// PUT /api/settings/timezone
+// IANA time zone this business operates in (e.g. "America/Chicago") — required
+// before Google Calendar sync can be connected, since it's needed to place
+// dropOffTime/pickUpTime correctly on a synced event (see lib/google-calendar-sync.js).
+router.put('/timezone', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const { timeZone } = req.body;
+  if (!timeZone) return res.status(400).json({ error: 'timeZone required' });
+
+  const client = await getOrCreateClient(locationId);
+  await db.client.update({ where: { id: client.id }, data: { timeZone } });
+
+  res.json({ timeZone });
+}));
+
+// GET /api/settings/google/connect?location_id=
+// Redirects into Google's OAuth consent screen. Requires a time zone already
+// saved (see PUT /timezone) — otherwise a connected calendar would have no
+// way to know what "9:00 AM" actually means for this business.
+router.get('/google/connect', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const client = await getOrCreateClient(locationId);
+  if (!client.timeZone) return res.status(400).json({ error: 'Set your time zone first' });
+
+  res.redirect(getAuthUrl(locationId));
+}));
+
+// GET /api/settings/google/callback?code=&state=
+// Google redirects here after the business approves (or denies) access.
+// state carries the locationId through the round trip — see lib/google-calendar.js.
+router.get('/google/callback', asyncHandler(async (req, res) => {
+  const { code, state: locationId } = req.query;
+  if (!locationId) return res.status(400).json({ error: 'state (location_id) missing from callback' });
+  if (!code) return res.redirect(`/settings.html?location_id=${encodeURIComponent(locationId)}&google=denied`);
+
+  const tokens = await exchangeCodeForTokens(code);
+  const email = await getUserEmail(tokens.access_token);
+
+  const client = await getOrCreateClient(locationId);
+  await db.client.update({
+    where: { id: client.id },
+    data: {
+      googleAccessTokenEncrypted: encrypt(tokens.access_token),
+      googleRefreshTokenEncrypted: encrypt(tokens.refresh_token),
+      googleTokenExpiry: new Date(Date.now() + tokens.expires_in * 1000),
+      googleCalendarEmail: email,
+    },
+  });
+
+  res.redirect(`/settings.html?location_id=${encodeURIComponent(locationId)}&google=connected`);
+}));
+
+// DELETE /api/settings/google-connection
+// Disconnects Google Calendar sync. Already-synced events are left as-is on
+// the business's calendar — only future confirms stop pushing new ones.
+router.delete('/google-connection', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+
+  const client = await getOrCreateClient(locationId);
+  await db.client.update({
+    where: { id: client.id },
+    data: {
+      googleAccessTokenEncrypted: null,
+      googleRefreshTokenEncrypted: null,
+      googleTokenExpiry: null,
+      googleCalendarEmail: null,
+    },
+  });
+
+  res.json({ googleConnected: false });
 }));
 
 // Same guard as routes/bookings.js — these endpoints call GHL on the business's

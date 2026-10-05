@@ -9,7 +9,7 @@ import { asyncHandler } from '../lib/async-handler.js';
 import { decrypt } from '../lib/crypto.js';
 import { checkPoolAvailability } from '../lib/availability.js';
 import { computeStayTotalFromBooking, computeDepositFromBooking, countUnits } from '../lib/quote.js';
-import { createAndSendInvoice, getInvoiceStatus, getStripeCustomerIdForInvoice } from '../lib/ghl-invoices.js';
+import { createAndSendInvoice, getInvoiceStatus, getStripeCustomerIdForInvoice, voidInvoice } from '../lib/ghl-invoices.js';
 import { notifyStaff, notifyContactDirect } from '../lib/ghl-notifications.js';
 import {
   upsertContact,
@@ -21,7 +21,9 @@ import {
   getVaccineStatus,
   vaccineStatusFromRecord,
   dogSummaryFromRecord,
+  buildDogFieldMap,
 } from '../lib/ghl-contacts.js';
+import { syncBookingToGoogleCalendar } from '../lib/google-calendar-sync.js';
 
 const router = Router();
 
@@ -31,6 +33,21 @@ const router = Router();
 function todayUTC() {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+// Guards Check In/Check Out against a staff member double/triple-tapping the
+// button while the request is still in flight (it calls out to GHL to create
+// and send an invoice, which can take a few seconds) — without this, each tap
+// read the booking as still CONFIRMED/ACTIVE and independently created its own
+// invoice, so a single check-out could send the client two or three identical
+// balance invoices. Released in a `finally` even on failure, so a genuine
+// error (e.g. GHL down) still leaves the booking retryable afterward.
+const bookingActionsInFlight = new Set();
+
+function withBookingLock(bookingId, fn) {
+  if (bookingActionsInFlight.has(bookingId)) return null;
+  bookingActionsInFlight.add(bookingId);
+  return fn().finally(() => bookingActionsInFlight.delete(bookingId));
 }
 
 async function getClient(ghlLocationId) {
@@ -65,19 +82,6 @@ function requireDogMapping(client) {
     throw err;
   }
   return buildDogFieldMap(client);
-}
-
-function buildDogFieldMap(client) {
-  return {
-    objectKey: client.dogObjectKey,
-    nameKey: client.dogNameFieldKey,
-    breedKey: client.dogBreedFieldKey,
-    notesKey: client.dogNotesFieldKey,
-    feedingKey: client.dogFeedingFieldKey,
-    behavioralKey: client.dogBehavioralFieldKey,
-    medsKey: client.dogMedsFieldKey,
-    vaccineKeys: JSON.parse(client.dogVaccineFieldKeys || '[]'),
-  };
 }
 
 // Captures the Stripe Customer ID behind the (already paid) deposit invoice,
@@ -159,6 +163,19 @@ async function sendRemainderInvoice({ client, booking, service, locationId, toke
   // have a usable Stripe customer yet.
   const created = await createAndSendInvoice({ locationId, contact, description, amount: remainder, token });
   const remainderInvoiceId = created.invoiceId;
+
+  // The deposit invoice never got paid, so its full amount is already folded
+  // into the balance invoice above — void it instead of leaving it sitting
+  // open in GHL, which would otherwise look like it's still owed on top of
+  // the balance that already covers it. Best-effort: a failure here shouldn't
+  // block the balance invoice that already went out.
+  if (booking.ghlInvoiceId && depositPaid === 0) {
+    try {
+      await voidInvoice(booking.ghlInvoiceId, locationId, token);
+    } catch (err) {
+      console.warn(`Failed to void stale deposit invoice ${booking.ghlInvoiceId}: ${err.message}`);
+    }
+  }
 
   let autoChargeAttempted = false;
   if (client.balanceAutoChargeWebhookUrl) {
@@ -693,6 +710,14 @@ router.put('/:id/confirm', asyncHandler(async (req, res) => {
   });
 
   res.json({ booking: updated });
+
+  // Fire-and-forget — a business's optional Google Calendar sync should never
+  // delay or fail the confirmation itself. No-ops immediately if not connected.
+  if (client.googleAccessTokenEncrypted) {
+    syncBookingToGoogleCalendar({ client, booking: updated, locationId, token: requireGhlToken(client) }).catch((err) => {
+      console.warn(`Google Calendar sync failed for booking ${updated.id}: ${err.message}`);
+    });
+  }
 }));
 
 // PUT /api/bookings/:id/reassign-unit
@@ -799,64 +824,74 @@ router.put('/:id/check-in', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: `Cannot check in a booking with status ${booking.status}` });
   }
 
-  // Staff don't always click Check In the moment a dog actually arrives (short-staffed,
-  // busy front desk) — lets them back-date to when it really happened instead of
-  // silently billing from whenever they got around to clicking the button. Defaults to
-  // today/the originally requested drop-off time when the caller doesn't override them.
-  let actualStartDate = todayUTC();
-  if (req.body?.actualStartDate) {
-    const parsed = new Date(`${req.body.actualStartDate}T00:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'Invalid actualStartDate' });
-    if (parsed > todayUTC()) return res.status(400).json({ error: 'actualStartDate cannot be in the future' });
-    actualStartDate = parsed;
-  }
-  const dropOffTime = req.body?.dropOffTime || booking.dropOffTime;
+  const result = await withBookingLock(booking.id, async () => {
+    // Staff don't always click Check In the moment a dog actually arrives (short-staffed,
+    // busy front desk) — lets them back-date to when it really happened instead of
+    // silently billing from whenever they got around to clicking the button. Defaults to
+    // today/the originally requested drop-off time when the caller doesn't override them.
+    let actualStartDate = todayUTC();
+    if (req.body?.actualStartDate) {
+      const parsed = new Date(`${req.body.actualStartDate}T00:00:00Z`);
+      if (Number.isNaN(parsed.getTime())) return { status: 400, body: { error: 'Invalid actualStartDate' } };
+      if (parsed > todayUTC()) return { status: 400, body: { error: 'actualStartDate cannot be in the future' } };
+      actualStartDate = parsed;
+    }
+    const dropOffTime = req.body?.dropOffTime || booking.dropOffTime;
 
-  let vaccineCheck;
-  try {
-    const status = await getVaccineStatus(booking.ghlDogObjectId, dogFieldMap, token);
-    vaccineCheck = { checked: true, timestamp: new Date().toISOString(), details: status };
-  } catch {
-    vaccineCheck = { checked: false, timestamp: new Date().toISOString(), details: null };
-  }
+    let vaccineCheck;
+    try {
+      const status = await getVaccineStatus(booking.ghlDogObjectId, dogFieldMap, token);
+      vaccineCheck = { checked: true, timestamp: new Date().toISOString(), details: status };
+    } catch {
+      vaccineCheck = { checked: false, timestamp: new Date().toISOString(), details: null };
+    }
 
-  // Best-effort: the deposit may already be paid by check-in time, in which
-  // case this saves needing to try again at check-out.
-  if (client.balanceAutoChargeWebhookUrl) {
-    await ensureStripeCustomerId(booking, locationId, token);
-  }
+    // Best-effort: the deposit may already be paid by check-in time, in which
+    // case this saves needing to try again at check-out.
+    if (client.balanceAutoChargeWebhookUrl) {
+      await ensureStripeCustomerId(booking, locationId, token);
+    }
 
-  // Some businesses want the balance invoice out the moment the dog is
-  // dropped off rather than waiting for actual pickup — see
-  // sendRemainderInvoice() for why this bills the originally booked dates,
-  // not whatever the real stay turns out to be.
-  let remainderResult = null;
-  if (client.finalInvoiceTiming === 'at_checkin') {
-    const service = client.services.find((s) => s.serviceType === booking.serviceType);
-    if (!service) return res.status(400).json({ error: `${booking.serviceType} is no longer configured for this client` });
-    remainderResult = await sendRemainderInvoice({ client, booking, service, locationId, token });
-    if (!remainderResult.ok) return res.status(remainderResult.status).json({ error: remainderResult.error });
-  }
+    // Some businesses want the balance invoice out the moment the dog is
+    // dropped off rather than waiting for actual pickup — see
+    // sendRemainderInvoice() for why this bills the originally booked dates,
+    // not whatever the real stay turns out to be.
+    let remainderResult = null;
+    if (client.finalInvoiceTiming === 'at_checkin') {
+      const service = client.services.find((s) => s.serviceType === booking.serviceType);
+      if (!service) return { status: 400, body: { error: `${booking.serviceType} is no longer configured for this client` } };
+      remainderResult = await sendRemainderInvoice({ client, booking, service, locationId, token });
+      if (!remainderResult.ok) return { status: remainderResult.status, body: { error: remainderResult.error } };
+    }
 
-  const updated = await db.booking.update({
-    where: { id: req.params.id },
-    data: {
-      status: 'ACTIVE',
-      actualStartDate,
-      dropOffTime,
-      vaccineCheckDropoff: JSON.stringify(vaccineCheck),
-      ...(remainderResult?.remainderInvoiceId ? { ghlRemainderInvoiceId: remainderResult.remainderInvoiceId } : {}),
-    },
+    const updated = await db.booking.update({
+      where: { id: req.params.id },
+      data: {
+        status: 'ACTIVE',
+        actualStartDate,
+        dropOffTime,
+        vaccineCheckDropoff: JSON.stringify(vaccineCheck),
+        ...(remainderResult?.remainderInvoiceId ? { ghlRemainderInvoiceId: remainderResult.remainderInvoiceId } : {}),
+      },
+    });
+
+    return {
+      status: 200,
+      body: {
+        booking: updated,
+        ...(remainderResult ? {
+          remainder: remainderResult.remainder,
+          remainderInvoiceId: remainderResult.remainderInvoiceId,
+          autoChargeAttempted: remainderResult.autoChargeAttempted,
+        } : {}),
+      },
+    };
   });
 
-  res.json({
-    booking: updated,
-    ...(remainderResult ? {
-      remainder: remainderResult.remainder,
-      remainderInvoiceId: remainderResult.remainderInvoiceId,
-      autoChargeAttempted: remainderResult.autoChargeAttempted,
-    } : {}),
-  });
+  if (result === null) {
+    return res.status(409).json({ error: 'This booking is already being checked in — please wait a moment and refresh.' });
+  }
+  res.status(result.status).json(result.body);
 }));
 
 // PUT /api/bookings/:id/check-out
@@ -881,55 +916,65 @@ router.put('/:id/check-out', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: `${booking.serviceType} is no longer configured for this client` });
   }
 
-  // Bill for what actually happened (extended stay, early pickup, etc.), not
-  // what was originally booked — actualStartDate was already set at Check In;
-  // actualEndDate is "today" (real pickup date) instead of the booked endDate.
-  // Staff can override both here for the same reason as Check In (see there):
-  // a busy or short-staffed front desk doesn't always click this the moment
-  // the dog actually leaves, and billing would otherwise silently run short.
-  let actualEndDate = todayUTC();
-  if (req.body?.actualEndDate) {
-    const parsed = new Date(`${req.body.actualEndDate}T00:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'Invalid actualEndDate' });
-    if (parsed > todayUTC()) return res.status(400).json({ error: 'actualEndDate cannot be in the future' });
-    if (booking.actualStartDate && parsed < booking.actualStartDate) {
-      return res.status(400).json({ error: 'actualEndDate cannot be before the actual check-in date' });
+  const result = await withBookingLock(booking.id, async () => {
+    // Bill for what actually happened (extended stay, early pickup, etc.), not
+    // what was originally booked — actualStartDate was already set at Check In;
+    // actualEndDate is "today" (real pickup date) instead of the booked endDate.
+    // Staff can override both here for the same reason as Check In (see there):
+    // a busy or short-staffed front desk doesn't always click this the moment
+    // the dog actually leaves, and billing would otherwise silently run short.
+    let actualEndDate = todayUTC();
+    if (req.body?.actualEndDate) {
+      const parsed = new Date(`${req.body.actualEndDate}T00:00:00Z`);
+      if (Number.isNaN(parsed.getTime())) return { status: 400, body: { error: 'Invalid actualEndDate' } };
+      if (parsed > todayUTC()) return { status: 400, body: { error: 'actualEndDate cannot be in the future' } };
+      if (booking.actualStartDate && parsed < booking.actualStartDate) {
+        return { status: 400, body: { error: 'actualEndDate cannot be before the actual check-in date' } };
+      }
+      actualEndDate = parsed;
     }
-    actualEndDate = parsed;
-  }
-  const pickUpTime = req.body?.pickUpTime || booking.pickUpTime;
+    const pickUpTime = req.body?.pickUpTime || booking.pickUpTime;
 
-  // If this business invoices at Check In instead (finalInvoiceTiming
-  // 'at_checkin'), the balance was already sent then — booking.ghlRemainderInvoiceId
-  // already holds it, so there's nothing left to bill here.
-  let remainder = 0;
-  let remainderInvoiceId = booking.ghlRemainderInvoiceId;
-  let autoChargeAttempted = false;
-  if (client.finalInvoiceTiming !== 'at_checkin') {
-    const result = await sendRemainderInvoice({ client, booking: { ...booking, actualEndDate }, service, locationId, token });
-    if (!result.ok) return res.status(result.status).json({ error: result.error });
-    remainder = result.remainder;
-    remainderInvoiceId = result.remainderInvoiceId;
-    autoChargeAttempted = result.autoChargeAttempted;
-  }
+    // If this business invoices at Check In instead (finalInvoiceTiming
+    // 'at_checkin'), the balance was already sent then — booking.ghlRemainderInvoiceId
+    // already holds it, so there's nothing left to bill here.
+    let remainder = 0;
+    let remainderInvoiceId = booking.ghlRemainderInvoiceId;
+    let autoChargeAttempted = false;
+    if (client.finalInvoiceTiming !== 'at_checkin') {
+      const remainderResult = await sendRemainderInvoice({ client, booking: { ...booking, actualEndDate }, service, locationId, token });
+      if (!remainderResult.ok) return { status: remainderResult.status, body: { error: remainderResult.error } };
+      remainder = remainderResult.remainder;
+      remainderInvoiceId = remainderResult.remainderInvoiceId;
+      autoChargeAttempted = remainderResult.autoChargeAttempted;
+    }
 
-  const updated = await db.booking.update({
-    where: { id: req.params.id },
-    data: { status: 'COMPLETED', actualEndDate, pickUpTime, ghlRemainderInvoiceId: remainderInvoiceId },
+    const updated = await db.booking.update({
+      where: { id: req.params.id },
+      data: { status: 'COMPLETED', actualEndDate, pickUpTime, ghlRemainderInvoiceId: remainderInvoiceId },
+    });
+
+    // autoChargeAttempted only means the charge request was accepted by GHL's
+    // workflow webhook, not that the charge itself succeeded — GHL workflows
+    // run asynchronously, so there's no synchronous success/failure to report
+    // here. Staff should still confirm via GHL's Transactions/Payments that it
+    // actually went through, especially early on.
+    return {
+      status: 200,
+      body: {
+        booking: updated,
+        remainder,
+        remainderInvoiceId,
+        autoChargeAttempted,
+        invoicedAtCheckIn: client.finalInvoiceTiming === 'at_checkin',
+      },
+    };
   });
 
-  // autoChargeAttempted only means the charge request was accepted by GHL's
-  // workflow webhook, not that the charge itself succeeded — GHL workflows
-  // run asynchronously, so there's no synchronous success/failure to report
-  // here. Staff should still confirm via GHL's Transactions/Payments that it
-  // actually went through, especially early on.
-  res.json({
-    booking: updated,
-    remainder,
-    remainderInvoiceId,
-    autoChargeAttempted,
-    invoicedAtCheckIn: client.finalInvoiceTiming === 'at_checkin',
-  });
+  if (result === null) {
+    return res.status(409).json({ error: 'This booking is already being checked out — please wait a moment and refresh.' });
+  }
+  res.status(result.status).json(result.body);
 }));
 
 export default router;

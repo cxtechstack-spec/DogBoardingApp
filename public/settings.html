@@ -296,6 +296,37 @@
   <div style="margin-top:10px; font-size:12px; color:#888;">Location ID detected from this page's URL: <code id="debug-location-id"></code></div>
 </div>
 
+<!-- GOOGLE CALENDAR SYNC -->
+<div class="card">
+  <h2>Google Calendar Sync</h2>
+  <p style="color:#666; font-size:12px; margin-bottom:12px;">
+    Optional — connect a Google account and confirmed bookings will automatically appear on that calendar too,
+    alongside this app's own calendar. Set your time zone first so booking times land correctly.
+  </p>
+  <div class="field-row full">
+    <div>
+      <label class="field-label">Time Zone</label>
+      <select id="google-timezone">
+        <option value="">Select…</option>
+        <option value="America/New_York">Eastern (America/New_York)</option>
+        <option value="America/Chicago">Central (America/Chicago)</option>
+        <option value="America/Denver">Mountain (America/Denver)</option>
+        <option value="America/Phoenix">Mountain, no DST (America/Phoenix)</option>
+        <option value="America/Los_Angeles">Pacific (America/Los_Angeles)</option>
+        <option value="America/Anchorage">Alaska (America/Anchorage)</option>
+        <option value="Pacific/Honolulu">Hawaii (Pacific/Honolulu)</option>
+      </select>
+    </div>
+  </div>
+  <button class="save-btn" onclick="saveTimezone()">Save Time Zone</button>
+  <span class="save-status" id="status-google-timezone"></span>
+  <div style="margin-top:16px; padding-top:16px; border-top:1px solid #eee;">
+    <a class="save-btn" id="google-connect-btn" href="#" style="display:inline-block; text-decoration:none;">Connect Google Calendar</a>
+    <button class="save-btn" id="google-disconnect-btn" style="display:none; background:#888;" onclick="disconnectGoogle()">Disconnect</button>
+    <div id="google-connection-indicator" style="margin-top:10px; font-size:13px;"></div>
+  </div>
+</div>
+
 <!-- DOG OBJECT MAPPING -->
 <div class="card">
   <h2>Dog Object Mapping</h2>
@@ -700,6 +731,36 @@
     renderGhlConnectionStatus(true);
   }
 
+  function renderGoogleConnectionStatus(connected, email) {
+    document.getElementById('google-connection-indicator').innerHTML = connected
+      ? `<span style="color:#16a34a; font-weight:600;">✓ Connected as ${email || 'Google account'}</span>`
+      : '<span style="color:#888;">Not connected yet</span>';
+    document.getElementById('google-connect-btn').style.display = connected ? 'none' : 'inline-block';
+    document.getElementById('google-disconnect-btn').style.display = connected ? 'inline-block' : 'none';
+    document.getElementById('google-connect-btn').href = API('/api/settings/google/connect');
+  }
+
+  async function saveTimezone() {
+    const status = document.getElementById('status-google-timezone');
+    const timeZone = document.getElementById('google-timezone').value;
+    if (!timeZone) return;
+
+    status.textContent = 'Saving…';
+    const res = await fetch(API('/api/settings/timezone'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timeZone }),
+    });
+
+    status.textContent = res.ok ? '✓ Saved' : '✗ Error';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
+
+  async function disconnectGoogle() {
+    await fetch(API('/api/settings/google-connection'), { method: 'DELETE' });
+    renderGoogleConnectionStatus(false, null);
+  }
+
   // Holds the currently-saved mapping so newly-loaded object/field dropdowns
   // can restore the right selections instead of always starting blank.
   let currentDogMapping = null;
@@ -922,6 +983,8 @@
     const { client } = await res.json();
 
     renderGhlConnectionStatus(client.ghlConnected);
+    document.getElementById('google-timezone').value = client.timeZone || '';
+    renderGoogleConnectionStatus(client.googleConnected, client.googleCalendarEmail);
     document.getElementById('business-name').value = client.businessName || '';
     document.getElementById('new-dog-form-url').value = client.newDogFormUrl || '';
     document.getElementById('vaccine-update-form-url').value = client.vaccineUpdateFormUrl || '';
@@ -1212,6 +1275,14 @@
     const res = await fetch(API('/api/settings'));
     const { client } = await res.json();
     renderAddons(client.addOns);
+  }
+
+  // Brief confirmation after the Google OAuth redirect lands back here.
+  const googleOauthResult = params.get('google');
+  if (googleOauthResult === 'connected') {
+    setTimeout(() => alert('Google Calendar connected!'), 300);
+  } else if (googleOauthResult === 'denied') {
+    setTimeout(() => alert('Google Calendar connection was cancelled.'), 300);
   }
 
   // Serve the settings page and load current data

@@ -74,6 +74,17 @@ model Client {
   // JSON array of field keys — zero or more vaccine-expiration date fields.
   // "Current" means every listed field has a value and it isn't in the past.
   dogVaccineFieldKeys          String            @default("[]")
+  // IANA time zone (e.g. "America/Chicago") this business operates in — needed
+  // to place dropOffTime/pickUpTime correctly on a synced Google Calendar
+  // event. Null until set in Settings; gates the Google Calendar connect flow.
+  timeZone                     String?
+  // Optional per-business Google Calendar sync (see lib/google-calendar.js) —
+  // same encrypt-at-rest pattern as ghlApiTokenEncrypted. Null until the
+  // business completes the "Connect Google Calendar" OAuth flow in Settings.
+  googleAccessTokenEncrypted   String?
+  googleRefreshTokenEncrypted  String?
+  googleTokenExpiry            DateTime?
+  googleCalendarEmail          String?
   createdAt                    DateTime          @default(now())
   updatedAt                    DateTime          @updatedAt
 }
@@ -190,6 +201,10 @@ model Booking {
   // JSON: { checked: bool, timestamp: ISO, details: {} }
   vaccineCheckBooking   String?
   vaccineCheckDropoff   String?
+  // Set once this booking is pushed to the business's connected Google
+  // Calendar at Confirm time (see lib/google-calendar-sync.js). Null if the
+  // business isn't connected, or sync hasn't run/succeeded yet.
+  googleEventId         String?
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
 }
