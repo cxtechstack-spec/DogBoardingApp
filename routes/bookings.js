@@ -157,11 +157,14 @@ async function sendRemainderInvoice({ client, booking, service, locationId, toke
   const end = booking.actualEndDate ?? booking.endDate;
   const dateRange = `${start.toISOString().slice(0, 10)} to ${end.toISOString().slice(0, 10)}`;
   const description = `Balance Due — ${SERVICE_LABELS[booking.serviceType] || booking.serviceType} (${dateRange})`;
+  // Spells out where this number comes from, so it doesn't read as a repeat
+  // of the deposit invoice — see createAndSendInvoice's itemDescription.
+  const itemDescription = `Total: $${stayTotal.toFixed(2)}  —  Deposit Paid: -$${depositPaid.toFixed(2)}  —  Total Due Now: $${remainder.toFixed(2)}`;
 
   // The invoice is still created either way — it's the business's own record
   // of what's owed, and the fallback if auto-charge isn't set up or doesn't
   // have a usable Stripe customer yet.
-  const created = await createAndSendInvoice({ locationId, contact, description, amount: remainder, token });
+  const created = await createAndSendInvoice({ locationId, contact, description, itemDescription, amount: remainder, token });
   const remainderInvoiceId = created.invoiceId;
 
   // The deposit invoice never got paid, so its full amount is already folded
@@ -687,6 +690,7 @@ router.put('/:id/confirm', asyncHandler(async (req, res) => {
   // failure here leaves the booking untouched (still REQUESTED) — staff just
   // retry Confirm rather than ending up with a confirmed-but-uninvoiced stay.
   let ghlInvoiceId = null;
+  const stayTotal = computeStayTotalFromBooking(booking, service);
   const deposit = computeDepositFromBooking(booking, service);
   if (deposit > 0) {
     const token = requireGhlToken(client);
@@ -694,10 +698,16 @@ router.put('/:id/confirm', asyncHandler(async (req, res) => {
     if (!contact) return res.status(404).json({ error: 'Owner contact not found' });
 
     const dateRange = `${booking.startDate.toISOString().slice(0, 10)} to ${booking.endDate.toISOString().slice(0, 10)}`;
+    // "Estimated" on the remainder since the real balance is billed from the
+    // actual check-in/check-out dates (see computeStayTotalFromBooking) — an
+    // extended or early-ended stay will come out slightly different.
+    const estimatedRemainder = Math.round((stayTotal - deposit) * 100) / 100;
+    const itemDescription = `Total Due: $${stayTotal.toFixed(2)}  —  Deposit Due Now: $${deposit.toFixed(2)}  —  Estimated Remainder Due at Pick-Up: $${estimatedRemainder.toFixed(2)}`;
     const created = await createAndSendInvoice({
       locationId,
       contact,
       description: `Deposit — ${SERVICE_LABELS[booking.serviceType] || booking.serviceType} (${dateRange})`,
+      itemDescription,
       amount: deposit,
       token,
     });
