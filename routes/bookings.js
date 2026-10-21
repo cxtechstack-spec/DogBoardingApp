@@ -831,10 +831,13 @@ router.put('/:id/deny', asyncHandler(async (req, res) => {
 }));
 
 // PUT /api/bookings/:id/cancel
-// CONFIRMED -> CANCELLED, for stays that never happened (no-show, client
-// cancelled by phone) so they stop sitting in the check-in queue forever.
-// Voids the deposit invoice only if it's still unpaid — a paid deposit is left
-// alone so staff can decide on a refund themselves in GHL, never automatically.
+// CONFIRMED/ACTIVE -> CANCELLED, for stays that never happened or were never
+// closed out (no-show, client cancelled by phone, checked in by mistake) so
+// they stop sitting in the check-in/check-out queues forever. ACTIVE is
+// allowed because staff sometimes check in by mistake, and those were stuck.
+// Voids the deposit and (if sent at Check In) balance invoices only if they're
+// still unpaid — a paid one is left alone so staff can decide on a refund
+// themselves in GHL, never automatically.
 // Deliberately doesn't notify the client: staff are usually cleaning up after
 // a conversation that already happened. Freeing the unit is automatic, since
 // availability only counts CONFIRMED/ACTIVE (see lib/availability.js).
@@ -847,22 +850,23 @@ router.put('/:id/cancel', asyncHandler(async (req, res) => {
 
   const booking = await db.booking.findUnique({ where: { id: req.params.id } });
   if (!booking || booking.clientId !== client.id) return res.status(404).json({ error: 'Booking not found' });
-  if (booking.status !== 'CONFIRMED') {
+  if (!['CONFIRMED', 'ACTIVE'].includes(booking.status)) {
     return res.status(400).json({ error: `Cannot cancel a booking with status ${booking.status}` });
   }
 
   const result = await withBookingLock(booking.id, async () => {
-    let depositPaid = false;
-    let depositVoided = false;
-    if (booking.ghlInvoiceId) {
-      // Not best-effort like the void in sendRemainderInvoice: if this fails the
-      // booking stays Confirmed so staff can retry, rather than leaving an open
-      // invoice behind with no booking left on screen to remind anyone of it.
-      const invoiceStatus = await getInvoiceStatus(booking.ghlInvoiceId, locationId, token);
-      depositPaid = invoiceStatus.paid;
-      if (!depositPaid && invoiceStatus.status !== 'void') {
-        await voidInvoice(booking.ghlInvoiceId, locationId, token);
-        depositVoided = true;
+    let anyPaid = false;
+    let anyVoided = false;
+    // Not best-effort like the void in sendRemainderInvoice: if this fails the
+    // booking stays as-is so staff can retry, rather than leaving an open
+    // invoice behind with no booking left on screen to remind anyone of it.
+    for (const invoiceId of [booking.ghlInvoiceId, booking.ghlRemainderInvoiceId].filter(Boolean)) {
+      const invoiceStatus = await getInvoiceStatus(invoiceId, locationId, token);
+      if (invoiceStatus.paid) {
+        anyPaid = true;
+      } else if (invoiceStatus.status !== 'void') {
+        await voidInvoice(invoiceId, locationId, token);
+        anyVoided = true;
       }
     }
 
@@ -870,7 +874,7 @@ router.put('/:id/cancel', asyncHandler(async (req, res) => {
       where: { id: req.params.id },
       data: { status: 'CANCELLED' },
     });
-    return { status: 200, body: { booking: updated, depositPaid, depositVoided } };
+    return { status: 200, body: { booking: updated, anyPaid, anyVoided } };
   });
 
   if (result === null) {

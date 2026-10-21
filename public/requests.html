@@ -356,6 +356,7 @@
           <input type="time" id="checkout-time-${b.id}" value="${b.pickUpTime || nowLocal}" title="Actual pick-up time">
           <button class="confirm-btn" onclick="checkOutBooking(event, '${b.id}')">Check Out</button>
         </div>
+        <button class="deny-btn" onclick="cancelBooking(event, '${b.id}')">Cancel Booking</button>
       </div>
     `;
   }
@@ -442,7 +443,7 @@
 
   async function cancelBooking(event, id) {
     // Can't be undone, and sits right next to Check In — worth one extra click.
-    if (!confirm('Cancel this booking? It will be removed from the check-in list and calendar, and an unpaid deposit invoice will be voided. The client is not notified.')) return;
+    if (!confirm('Cancel this booking? It will be removed from this list and the calendar, and any unpaid invoices for it will be voided. The client is not notified.')) return;
     const button = event.target;
     button.disabled = true;
     const res = await fetch(API(`/api/bookings/${id}/cancel`), { method: 'PUT' });
@@ -452,11 +453,11 @@
       button.disabled = false;
       return;
     }
-    const { depositPaid, depositVoided } = await res.json();
-    if (depositPaid) {
-      alert('Booking cancelled. The deposit was already paid, so its invoice was left as-is — issue a refund in GHL if one is owed.');
-    } else if (depositVoided) {
-      alert('Booking cancelled and the unpaid deposit invoice was voided.');
+    const { anyPaid, anyVoided } = await res.json();
+    if (anyPaid) {
+      alert(`Booking cancelled.${anyVoided ? ' Unpaid invoices were voided.' : ''} A payment was already made on this booking, so that invoice was left as-is — issue a refund in GHL if one is owed.`);
+    } else if (anyVoided) {
+      alert('Booking cancelled and its unpaid invoices were voided.');
     }
     loadAll();
   }
