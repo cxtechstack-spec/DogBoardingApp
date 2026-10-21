@@ -1,7 +1,7 @@
 // Booking request + review routes.
 // GET /availability, POST /contacts, POST /dogs, and POST / are public (no login) —
-// used by the client-facing request.html form. GET /, PUT /:id/confirm, and
-// PUT /:id/deny are staff-only, called from the GHL-embedded requests.html queue.
+// used by the client-facing request.html form. GET /, PUT /:id/confirm,
+// PUT /:id/deny, and PUT /:id/cancel are staff-only, called from the GHL-embedded requests.html queue.
 
 import { Router } from 'express';
 import db from '../lib/db.js';
@@ -23,7 +23,7 @@ import {
   dogSummaryFromRecord,
   buildDogFieldMap,
 } from '../lib/ghl-contacts.js';
-import { syncBookingToGoogleCalendar } from '../lib/google-calendar-sync.js';
+import { syncBookingToGoogleCalendar, removeBookingFromGoogleCalendar } from '../lib/google-calendar-sync.js';
 
 const router = Router();
 
@@ -564,7 +564,7 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 // GET /api/bookings/calendar?location_id=&start=&end=
-// Confirmed/Active bookings overlapping [start, end], enriched, plus the full
+// Confirmed/Active/Completed bookings overlapping [start, end], enriched, plus the full
 // pool -> unit structure so the frontend can render every unit as a row —
 // including empty ones — not just occupied ones. Also returns still-pending
 // REQUESTED bookings for the same range (they have no unit yet, so the
@@ -587,10 +587,23 @@ router.get('/calendar', asyncHandler(async (req, res) => {
     db.booking.findMany({
       where: {
         clientId: client.id,
-        status: { in: ['CONFIRMED', 'ACTIVE'] },
         unitId: { not: null },
-        startDate: { lte: new Date(end) },
-        endDate: { gte: new Date(start) },
+        OR: [
+          {
+            status: { in: ['CONFIRMED', 'ACTIVE'] },
+            startDate: { lte: new Date(end) },
+            endDate: { gte: new Date(start) },
+          },
+          // Completed stays are drawn on their real check-in/out dates, which
+          // can fall outside the booked range (late pick-up), so match either.
+          {
+            status: 'COMPLETED',
+            OR: [
+              { startDate: { lte: new Date(end) }, endDate: { gte: new Date(start) } },
+              { actualStartDate: { lte: new Date(end) }, actualEndDate: { gte: new Date(start) } },
+            ],
+          },
+        ],
       },
       orderBy: { startDate: 'asc' },
     }),
@@ -814,6 +827,61 @@ router.put('/:id/deny', asyncHandler(async (req, res) => {
     });
   } catch (err) {
     console.warn(`Denial notification skipped: ${err.message}`);
+  }
+}));
+
+// PUT /api/bookings/:id/cancel
+// CONFIRMED -> CANCELLED, for stays that never happened (no-show, client
+// cancelled by phone) so they stop sitting in the check-in queue forever.
+// Voids the deposit invoice only if it's still unpaid — a paid deposit is left
+// alone so staff can decide on a refund themselves in GHL, never automatically.
+// Deliberately doesn't notify the client: staff are usually cleaning up after
+// a conversation that already happened. Freeing the unit is automatic, since
+// availability only counts CONFIRMED/ACTIVE (see lib/availability.js).
+router.put('/:id/cancel', asyncHandler(async (req, res) => {
+  const locationId = req.query.location_id;
+  if (!locationId) return res.status(400).json({ error: 'location_id required' });
+  const client = await getClient(locationId);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const token = requireGhlToken(client);
+
+  const booking = await db.booking.findUnique({ where: { id: req.params.id } });
+  if (!booking || booking.clientId !== client.id) return res.status(404).json({ error: 'Booking not found' });
+  if (booking.status !== 'CONFIRMED') {
+    return res.status(400).json({ error: `Cannot cancel a booking with status ${booking.status}` });
+  }
+
+  const result = await withBookingLock(booking.id, async () => {
+    let depositPaid = false;
+    let depositVoided = false;
+    if (booking.ghlInvoiceId) {
+      // Not best-effort like the void in sendRemainderInvoice: if this fails the
+      // booking stays Confirmed so staff can retry, rather than leaving an open
+      // invoice behind with no booking left on screen to remind anyone of it.
+      const invoiceStatus = await getInvoiceStatus(booking.ghlInvoiceId, locationId, token);
+      depositPaid = invoiceStatus.paid;
+      if (!depositPaid && invoiceStatus.status !== 'void') {
+        await voidInvoice(booking.ghlInvoiceId, locationId, token);
+        depositVoided = true;
+      }
+    }
+
+    const updated = await db.booking.update({
+      where: { id: req.params.id },
+      data: { status: 'CANCELLED' },
+    });
+    return { status: 200, body: { booking: updated, depositPaid, depositVoided } };
+  });
+
+  if (result === null) {
+    return res.status(409).json({ error: 'This booking is already being updated — please wait a moment and refresh.' });
+  }
+  res.status(result.status).json(result.body);
+
+  if (result.status === 200) {
+    removeBookingFromGoogleCalendar({ client, booking }).catch((err) => {
+      console.warn(`Google Calendar event removal failed for booking ${booking.id}: ${err.message}`);
+    });
   }
 }));
 

@@ -232,4 +232,5 @@ enum BookingStatus {
   ACTIVE
   COMPLETED
   DENIED
+  CANCELLED // Staff-cleared after confirm (e.g. a no-show) — see PUT /api/bookings/:id/cancel
 }

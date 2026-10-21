@@ -124,6 +124,7 @@
 
     .cal-booking.active-status { background: #16a34a; }
     .cal-booking.pending-status { background: #f59e0b; cursor: pointer; }
+    .cal-booking.completed-status { background: #9ca3af; cursor: default; }
     .cal-booking.dragging { opacity: 0.4; }
 
     /* Deposit invoice was sent at Confirm but hasn't been paid yet — flagged
@@ -361,8 +362,10 @@
       const gridRow = unitRowIndex.get(b.unit?.id);
       if (!gridRow) return;
 
-      const bStart = new Date(b.startDate);
-      const bEnd = new Date(b.endDate);
+      // Completed stays show when the dog was actually here, not what was booked.
+      const isCompleted = b.status === 'COMPLETED';
+      const bStart = new Date((isCompleted && b.actualStartDate) || b.startDate);
+      const bEnd = new Date((isCompleted && b.actualEndDate) || b.endDate);
       const clippedStart = bStart < rangeStart ? rangeStart : bStart;
       const clippedEnd = bEnd > rangeLast ? rangeLast : bEnd;
       if (clippedStart > clippedEnd) return;
@@ -370,7 +373,7 @@
       const colStart = daysBetween(rangeStart, clippedStart) + 2;
       const colEnd = daysBetween(rangeStart, clippedEnd) + 3;
       const dogName = b.dog?.name || 'Unknown dog';
-      const statusClass = b.status === 'ACTIVE' ? 'active-status' : '';
+      const statusClass = b.status === 'ACTIVE' ? 'active-status' : isCompleted ? 'completed-status' : '';
       const timesNote = b.dropOffTime && b.pickUpTime ? ` — drop-off ${formatTime(b.dropOffTime)}, pick-up ${formatTime(b.pickUpTime)}` : '';
       // Only flagged before Check In — past that point its amount either got
       // paid or already got folded into the balance invoice at Check In/Out
@@ -379,6 +382,18 @@
       const depositUnpaid = b.status === 'CONFIRMED' && b.deposit?.required && !b.deposit?.paid;
       const depositClass = depositUnpaid ? 'deposit-unpaid' : '';
       const depositNote = depositUnpaid ? ' — ⚠️ deposit unpaid' : '';
+
+      // Completed stays are history — the server rejects moving them, and the
+      // requests queue has nothing left to act on, so they're display-only.
+      if (isCompleted) {
+        cells.push(`
+          <div class="cal-booking ${statusClass}" style="grid-column:${colStart}/${colEnd}; grid-row:${gridRow}"
+               title="${dogName} — ${SERVICE_LABELS[b.serviceType] || b.serviceType}${timesNote} — completed">
+            ✓ ${dogName}
+          </div>
+        `);
+        return;
+      }
 
       cells.push(`
         <div class="cal-booking ${statusClass} ${depositClass}" draggable="true" data-booking-id="${b.id}"
