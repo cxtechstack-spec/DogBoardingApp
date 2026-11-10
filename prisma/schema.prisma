@@ -205,6 +205,14 @@ model Booking {
   // Calendar at Confirm time (see lib/google-calendar-sync.js). Null if the
   // business isn't connected, or sync hasn't run/succeeded yet.
   googleEventId         String?
+  // Cancellation log — set together by PUT /:id/cancel so there's a record
+  // tied to the payment history of what was cancelled, why, and what staff
+  // decided to do with any money already paid. The outcome is a record of
+  // staff's decision only; the app never refunds or charges anything itself.
+  // Values: NO_PAYMENT | REFUND | FORFEIT | HOLD_CREDIT
+  cancelledAt                DateTime?
+  cancellationReason         String?
+  cancellationPaymentOutcome String?
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
 }

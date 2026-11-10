@@ -146,6 +146,21 @@
     .deny-btn:hover { background: #fef2f2; }
 
     .empty-state { color: #888; font-size: 13px; padding: 8px 0; }
+
+    .cancel-form {
+      display: none;
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid #fca5a5;
+      border-radius: 6px;
+      background: #fef2f2;
+    }
+    .cancel-form.open { display: grid; gap: 10px; }
+    .cancel-form label { font-size: 12px; font-weight: 500; color: #444; display: grid; gap: 4px; }
+    .cancel-form .hint { font-size: 12px; color: #666; }
+    .cancel-form .action-group { justify-content: flex-end; }
+
+    .card.cancelled { opacity: 0.85; }
   </style>
 </head>
 <body>
@@ -164,6 +179,11 @@
 
 <h2 class="section-title">Active — Awaiting Check-Out</h2>
 <div id="active-list">
+  <p class="empty-state">Loading…</p>
+</div>
+
+<h2 class="section-title">Cancelled — Most Recent 50</h2>
+<div id="cancelled-list">
   <p class="empty-state">Loading…</p>
 </div>
 
@@ -234,6 +254,21 @@
     return `<div class="behavioral-alert">⚠️ Behavioral Notes: ${dog.behavioral}</div>`;
   }
 
+  // The cancellation reason is free text typed by staff, so it's escaped
+  // before going into innerHTML.
+  function escapeHtml(text) {
+    return String(text ?? '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[char]);
+  }
+
+  const PAYMENT_OUTCOME_LABELS = {
+    NO_PAYMENT: 'No payment was made',
+    REFUND: 'Refund',
+    FORFEIT: 'Forfeit (keep payment)',
+    HOLD_CREDIT: 'Hold as credit on account',
+  };
+
   function bookingCardHtml(b, actionsHtml) {
     const addOnsText = b.addOnsSelected.length
       ? b.addOnsSelected.map((a) => `${a.name} x${a.qty}`).join(', ')
@@ -243,16 +278,21 @@
     const dogName = b.dog?.name || '(unknown dog)';
     const dogBreed = b.dog?.breed || '';
 
+    const isCancelled = b.status === 'CANCELLED';
+    // Unpaid invoices get voided on cancel, so "Deposit unpaid" would read
+    // like money is still owed — only a paid deposit matters in the log.
+    const showDepositBadge = !isCancelled || b.deposit?.paid;
+
     return `
-      <div class="card" id="booking-${b.id}">
+      <div class="card${isCancelled ? ' cancelled' : ''}" id="booking-${b.id}">
         <div class="request-header">
           <div>
             <h2>${dogName}${dogBreed ? ` — ${dogBreed}` : ''}</h2>
             <div class="sub">${ownerName}${ownerContact ? ` · ${ownerContact}` : ''}</div>
           </div>
           <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
-            ${vaccineBadge(b.vaccine)}
-            ${depositBadge(b.deposit)}
+            ${isCancelled ? '' : vaccineBadge(b.vaccine)}
+            ${showDepositBadge ? depositBadge(b.deposit) : ''}
           </div>
         </div>
         ${behavioralAlertHtml(b.dog)}
@@ -338,7 +378,60 @@
           <input type="time" id="checkin-time-${b.id}" value="${b.dropOffTime || nowLocal}" title="Actual drop-off time">
           <button class="confirm-btn" onclick="checkInBooking(event, '${b.id}')">Check In</button>
         </div>
-        <button class="deny-btn" onclick="cancelBooking(event, '${b.id}')">Cancel Booking</button>
+        <button class="deny-btn" onclick="toggleCancelForm('${b.id}')">Cancel Booking</button>
+      </div>
+      ${cancelFormHtml(b)}
+    `;
+  }
+
+  // Asks for the reason and the payment decision up front, so every
+  // cancellation leaves a record next to its invoices (see the Cancelled
+  // section) instead of just disappearing.
+  function cancelFormHtml(b) {
+    const outcomeOptions = Object.entries(PAYMENT_OUTCOME_LABELS)
+      .map(([value, label]) => `<option value="${value}">${label}</option>`)
+      .join('');
+    return `
+      <div class="cancel-form" id="cancel-form-${b.id}">
+        <label>Reason for cancelling
+          <textarea id="cancel-reason-${b.id}" placeholder="e.g. Owner called to cancel, no-show"></textarea>
+        </label>
+        <label>What happens to any payment already made?
+          <select id="cancel-outcome-${b.id}">
+            <option value="">Choose one…</option>
+            ${outcomeOptions}
+          </select>
+        </label>
+        <p class="hint">This only records your decision. Issue any refund in HighLevel. Unpaid invoices are voided automatically, and the client is not notified.</p>
+        <div class="action-group">
+          <button onclick="toggleCancelForm('${b.id}')" style="background:#fff; border:1px solid #d0d0d0; color:#444;">Keep Booking</button>
+          <button class="deny-btn" onclick="cancelBooking(event, '${b.id}')">Confirm Cancellation</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function toggleCancelForm(id) {
+    document.getElementById(`cancel-form-${id}`).classList.toggle('open');
+  }
+
+  function cancelledDetailsHtml(b) {
+    const cancelledOn = b.cancelledAt ? formatDateTime(b.cancelledAt) : 'Before cancellation logging';
+    const outcome = PAYMENT_OUTCOME_LABELS[b.cancellationPaymentOutcome] || 'Not recorded';
+    return `
+      <div class="detail-grid" style="border-bottom:none; padding-bottom:0; margin-bottom:0;">
+        <div>
+          <span class="field-label">Cancelled</span>
+          <span class="field-value">${cancelledOn}</span>
+        </div>
+        <div>
+          <span class="field-label">Payment Decision</span>
+          <span class="field-value">${outcome}</span>
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <span class="field-label">Reason</span>
+          <span class="field-value">${escapeHtml(b.cancellationReason) || 'No reason given'}</span>
+        </div>
       </div>
     `;
   }
@@ -356,8 +449,9 @@
           <input type="time" id="checkout-time-${b.id}" value="${b.pickUpTime || nowLocal}" title="Actual pick-up time">
           <button class="confirm-btn" onclick="checkOutBooking(event, '${b.id}')">Check Out</button>
         </div>
-        <button class="deny-btn" onclick="cancelBooking(event, '${b.id}')">Cancel Booking</button>
+        <button class="deny-btn" onclick="toggleCancelForm('${b.id}')">Cancel Booking</button>
       </div>
+      ${cancelFormHtml(b)}
     `;
   }
 
@@ -387,6 +481,7 @@
       loadSection('REQUESTED', 'requests-list', requestActionsHtml, 'No pending requests.'),
       loadSection('CONFIRMED', 'confirmed-list', confirmedActionsHtml, 'No confirmed bookings awaiting check-in.'),
       loadSection('ACTIVE', 'active-list', activeActionsHtml, 'No active stays awaiting check-out.'),
+      loadSection('CANCELLED', 'cancelled-list', cancelledDetailsHtml, 'No cancelled bookings.'),
     ]);
 
     highlightFromCalendarLink();
@@ -442,11 +537,22 @@
   }
 
   async function cancelBooking(event, id) {
-    // Can't be undone, and sits right next to Check In — worth one extra click.
-    if (!confirm('Cancel this booking? It will be removed from this list and the calendar, and any unpaid invoices for it will be voided. The client is not notified.')) return;
+    const cancellationPaymentOutcome = document.getElementById(`cancel-outcome-${id}`).value;
+    if (!cancellationPaymentOutcome) {
+      alert('Choose what happens to any payment already made.');
+      return;
+    }
+    const cancellationReason = document.getElementById(`cancel-reason-${id}`).value.trim();
+
+    // Can't be undone — worth one last check.
+    if (!confirm('Cancel this booking? It will move to the Cancelled list and come off the calendar.')) return;
     const button = event.target;
     button.disabled = true;
-    const res = await fetch(API(`/api/bookings/${id}/cancel`), { method: 'PUT' });
+    const res = await fetch(API(`/api/bookings/${id}/cancel`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cancellationReason, cancellationPaymentOutcome }),
+    });
     if (!res.ok) {
       const { error } = await res.json().catch(() => ({}));
       alert(error || 'Could not cancel this booking.');

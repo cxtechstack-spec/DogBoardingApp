@@ -553,9 +553,18 @@ router.get('/', asyncHandler(async (req, res) => {
   // people want the same dates, staff naturally see who asked first and can
   // give them first chance if the other gets denied. Confirmed/Active stay
   // sorted by stay date, which is what matters for check-in/out planning.
+  // Cancelled is a log, so newest first and capped — it only ever grows, and
+  // each row costs live GHL lookups to enrich. Ones cancelled before the log
+  // existed have no cancelledAt, so they sort last.
+  const orderBy = status === 'REQUESTED'
+    ? { createdAt: 'asc' }
+    : status === 'CANCELLED'
+      ? [{ cancelledAt: { sort: 'desc', nulls: 'last' } }, { updatedAt: 'desc' }]
+      : { startDate: 'asc' };
   const bookings = await db.booking.findMany({
     where: { clientId: client.id, status },
-    orderBy: status === 'REQUESTED' ? { createdAt: 'asc' } : { startDate: 'asc' },
+    orderBy,
+    take: status === 'CANCELLED' ? 50 : undefined,
   });
 
   const enriched = await Promise.all(bookings.map((b) => enrichBooking(b, dogFieldMap, locationId, token)));
@@ -841,7 +850,19 @@ router.put('/:id/deny', asyncHandler(async (req, res) => {
 // Deliberately doesn't notify the client: staff are usually cleaning up after
 // a conversation that already happened. Freeing the unit is automatic, since
 // availability only counts CONFIRMED/ACTIVE (see lib/availability.js).
+// Records why it was cancelled and what staff decided about any payment
+// already made, so the cancellation has a record next to its invoices.
+const CANCELLATION_PAYMENT_OUTCOMES = ['NO_PAYMENT', 'REFUND', 'FORFEIT', 'HOLD_CREDIT'];
+
 router.put('/:id/cancel', asyncHandler(async (req, res) => {
+  const cancellationReason = typeof req.body?.cancellationReason === 'string'
+    ? req.body.cancellationReason.trim() || null
+    : null;
+  const cancellationPaymentOutcome = req.body?.cancellationPaymentOutcome;
+  if (!CANCELLATION_PAYMENT_OUTCOMES.includes(cancellationPaymentOutcome)) {
+    return res.status(400).json({ error: `cancellationPaymentOutcome must be one of ${CANCELLATION_PAYMENT_OUTCOMES.join(', ')}` });
+  }
+
   const locationId = req.query.location_id;
   if (!locationId) return res.status(400).json({ error: 'location_id required' });
   const client = await getClient(locationId);
@@ -872,7 +893,12 @@ router.put('/:id/cancel', asyncHandler(async (req, res) => {
 
     const updated = await db.booking.update({
       where: { id: req.params.id },
-      data: { status: 'CANCELLED' },
+      data: {
+        status: 'CANCELLED',
+        cancelledAt: new Date(),
+        cancellationReason,
+        cancellationPaymentOutcome,
+      },
     });
     return { status: 200, body: { booking: updated, anyPaid, anyVoided } };
   });
